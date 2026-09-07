@@ -1,0 +1,49 @@
+# =========================
+# Operating System & IDEs
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# Environment Variables
+# =========================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# =========================
+# Frontend (React / Vite / Bun)
+# =========================
+**/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.eslintcache
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/bun.log
+
+# =========================
+# Backend (Go)
+# =========================
+# Compiled object files
+*.o
+*.a
+*.so
+
+# Executables (if you compile directly in the folder)
+*.exe
+*.test
+*.out
+backend/bin/
+backend/tmp/
+backend/main
+
+# Vendor folder (if we ever use 'go mod vendor')
+backend/vendor/
