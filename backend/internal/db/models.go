@@ -5,45 +5,217 @@
 package db
 
 import (
+	"time"
+
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Click struct {
-	ID         pgtype.UUID
-	LinkID     pgtype.UUID
-	TrakyoID   string
-	IpHash     pgtype.Text
-	UserAgent  pgtype.Text
-	GeoCountry pgtype.Text
-	CreatedAt  pgtype.Timestamptz
+	ID         int64         `json:"id"`
+	LinkID     uuid.UUID     `json:"link_id"`
+	VariantID  uuid.NullUUID `json:"variant_id"`
+	ClientID   uuid.UUID     `json:"client_id"`
+	VideoID    uuid.NullUUID `json:"video_id"`
+	TrakyoID   string        `json:"trakyo_id"`
+	IpHash     string        `json:"ip_hash"`
+	UserAgent  string        `json:"user_agent"`
+	Referrer   string        `json:"referrer"`
+	Country    string        `json:"country"`
+	DeviceType string        `json:"device_type"`
+	Browser    string        `json:"browser"`
+	Os         string        `json:"os"`
+	IsBot      bool          `json:"is_bot"`
+	CreatedAt  time.Time     `json:"created_at"`
 }
 
 type Client struct {
-	ID                  pgtype.UUID
-	WorkspaceID         pgtype.UUID
-	Name                string
-	YoutubeRefreshToken pgtype.Text
-	CreatedAt           pgtype.Timestamptz
+	ID           uuid.UUID `json:"id"`
+	WorkspaceID  uuid.UUID `json:"workspace_id"`
+	Name         string    `json:"name"`
+	ContactEmail string    `json:"contact_email"`
+	Timezone     string    `json:"timezone"`
+	Currency     string    `json:"currency"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type Conversion struct {
-	ID            pgtype.UUID
-	TrakyoID      pgtype.Text
-	EventType     string
-	RevenueAmount pgtype.Numeric
-	CreatedAt     pgtype.Timestamptz
+	ID                int64         `json:"id"`
+	ClientID          uuid.UUID     `json:"client_id"`
+	ClickID           pgtype.Int8   `json:"click_id"`
+	LinkID            uuid.NullUUID `json:"link_id"`
+	VideoID           uuid.NullUUID `json:"video_id"`
+	SubscriptionID    uuid.NullUUID `json:"subscription_id"`
+	TrakyoID          string        `json:"trakyo_id"`
+	Source            string        `json:"source"`
+	EventType         string        `json:"event_type"`
+	ExternalID        string        `json:"external_id"`
+	AmountCents       int64         `json:"amount_cents"`
+	Currency          string        `json:"currency"`
+	Email             string        `json:"email"`
+	AttributionMethod string        `json:"attribution_method"`
+	Raw               []byte        `json:"raw"`
+	OccurredAt        time.Time     `json:"occurred_at"`
+	CreatedAt         time.Time     `json:"created_at"`
+}
+
+type Domain struct {
+	ID        uuid.UUID `json:"id"`
+	ClientID  uuid.UUID `json:"client_id"`
+	Hostname  string    `json:"hostname"`
+	Verified  bool      `json:"verified"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Identity struct {
+	ID        uuid.UUID `json:"id"`
+	ClientID  uuid.UUID `json:"client_id"`
+	Email     string    `json:"email"`
+	TrakyoID  string    `json:"trakyo_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Integration struct {
+	ID               uuid.UUID `json:"id"`
+	ClientID         uuid.UUID `json:"client_id"`
+	Provider         string    `json:"provider"`
+	WebhookSecretEnc []byte    `json:"webhook_secret_enc"`
+	Config           []byte    `json:"config"`
+	IsActive         bool      `json:"is_active"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+type Invitation struct {
+	ID          uuid.UUID  `json:"id"`
+	WorkspaceID uuid.UUID  `json:"workspace_id"`
+	ClientID    uuid.UUID  `json:"client_id"`
+	Email       string     `json:"email"`
+	TokenHash   string     `json:"token_hash"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	AcceptedAt  *time.Time `json:"accepted_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+type LinkVariant struct {
+	ID        uuid.UUID `json:"id"`
+	LinkID    uuid.UUID `json:"link_id"`
+	TargetUrl string    `json:"target_url"`
+	Weight    int32     `json:"weight"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Membership struct {
+	ID          uuid.UUID     `json:"id"`
+	WorkspaceID uuid.UUID     `json:"workspace_id"`
+	UserID      uuid.UUID     `json:"user_id"`
+	Role        string        `json:"role"`
+	ClientID    uuid.NullUUID `json:"client_id"`
+	CreatedAt   time.Time     `json:"created_at"`
+}
+
+type NotificationChannel struct {
+	ID             uuid.UUID     `json:"id"`
+	WorkspaceID    uuid.UUID     `json:"workspace_id"`
+	ClientID       uuid.NullUUID `json:"client_id"`
+	Kind           string        `json:"kind"`
+	WebhookUrl     string        `json:"webhook_url"`
+	MinAmountCents int64         `json:"min_amount_cents"`
+	Events         []string      `json:"events"`
+	IsActive       bool          `json:"is_active"`
+	CreatedAt      time.Time     `json:"created_at"`
+}
+
+type ReportShare struct {
+	ID        uuid.UUID  `json:"id"`
+	ClientID  uuid.UUID  `json:"client_id"`
+	Token     string     `json:"token"`
+	Label     string     `json:"label"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type Subscription struct {
+	ID            uuid.UUID     `json:"id"`
+	ClientID      uuid.UUID     `json:"client_id"`
+	ExternalID    string        `json:"external_id"`
+	CustomerEmail string        `json:"customer_email"`
+	ClickID       pgtype.Int8   `json:"click_id"`
+	LinkID        uuid.NullUUID `json:"link_id"`
+	VideoID       uuid.NullUUID `json:"video_id"`
+	Status        string        `json:"status"`
+	StartedAt     time.Time     `json:"started_at"`
+	CanceledAt    *time.Time    `json:"canceled_at"`
 }
 
 type TrackingLink struct {
-	ID        pgtype.UUID
-	ClientID  pgtype.UUID
-	Slug      string
-	TargetUrl string
-	CreatedAt pgtype.Timestamptz
+	ID        uuid.UUID     `json:"id"`
+	ClientID  uuid.UUID     `json:"client_id"`
+	VideoID   uuid.NullUUID `json:"video_id"`
+	DomainID  uuid.NullUUID `json:"domain_id"`
+	Slug      string        `json:"slug"`
+	Name      string        `json:"name"`
+	TargetUrl string        `json:"target_url"`
+	IsActive  bool          `json:"is_active"`
+	ExpiresAt *time.Time    `json:"expires_at"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+type User struct {
+	ID           uuid.UUID `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"password_hash"`
+	Name         string    `json:"name"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type Video struct {
+	ID             uuid.UUID     `json:"id"`
+	ClientID       uuid.UUID     `json:"client_id"`
+	ChannelID      uuid.NullUUID `json:"channel_id"`
+	YoutubeVideoID string        `json:"youtube_video_id"`
+	Title          string        `json:"title"`
+	ThumbnailUrl   string        `json:"thumbnail_url"`
+	PublishedAt    *time.Time    `json:"published_at"`
+	CreatedAt      time.Time     `json:"created_at"`
+}
+
+type VideoCost struct {
+	ID          uuid.UUID   `json:"id"`
+	VideoID     uuid.UUID   `json:"video_id"`
+	Kind        string      `json:"kind"`
+	AmountCents int64       `json:"amount_cents"`
+	Note        string      `json:"note"`
+	IncurredOn  pgtype.Date `json:"incurred_on"`
+	CreatedAt   time.Time   `json:"created_at"`
+}
+
+type VideoStatsDaily struct {
+	VideoID      uuid.UUID   `json:"video_id"`
+	Day          pgtype.Date `json:"day"`
+	Views        int64       `json:"views"`
+	WatchMinutes int64       `json:"watch_minutes"`
+	SubsGained   int32       `json:"subs_gained"`
+	Impressions  int64       `json:"impressions"`
+	CtrBps       int32       `json:"ctr_bps"`
 }
 
 type Workspace struct {
-	ID        pgtype.UUID
-	Name      string
-	CreatedAt pgtype.Timestamptz
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type YoutubeChannel struct {
+	ID              uuid.UUID  `json:"id"`
+	ClientID        uuid.UUID  `json:"client_id"`
+	GoogleChannelID string     `json:"google_channel_id"`
+	Title           string     `json:"title"`
+	ThumbnailUrl    string     `json:"thumbnail_url"`
+	RefreshTokenEnc []byte     `json:"refresh_token_enc"`
+	Status          string     `json:"status"`
+	ConnectedAt     time.Time  `json:"connected_at"`
+	LastSyncedAt    *time.Time `json:"last_synced_at"`
 }

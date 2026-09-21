@@ -7,44 +7,1847 @@ package db
 
 import (
 	"context"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getLinkBySlug = `-- name: GetLinkBySlug :one
-SELECT id, target_url FROM tracking_links WHERE slug = $1 LIMIT 1
+const addLinkVariant = `-- name: AddLinkVariant :one
+INSERT INTO link_variants (link_id, target_url, weight)
+VALUES ($1, $2, $3)
+RETURNING id, link_id, target_url, weight, is_active, created_at
 `
 
-type GetLinkBySlugRow struct {
-	ID        pgtype.UUID
-	TargetUrl string
+type AddLinkVariantParams struct {
+	LinkID    uuid.UUID `json:"link_id"`
+	TargetUrl string    `json:"target_url"`
+	Weight    int32     `json:"weight"`
 }
 
-func (q *Queries) GetLinkBySlug(ctx context.Context, slug string) (GetLinkBySlugRow, error) {
-	row := q.db.QueryRow(ctx, getLinkBySlug, slug)
-	var i GetLinkBySlugRow
-	err := row.Scan(&i.ID, &i.TargetUrl)
+func (q *Queries) AddLinkVariant(ctx context.Context, arg AddLinkVariantParams) (LinkVariant, error) {
+	row := q.db.QueryRow(ctx, addLinkVariant, arg.LinkID, arg.TargetUrl, arg.Weight)
+	var i LinkVariant
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.TargetUrl,
+		&i.Weight,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
-const insertClick = `-- name: InsertClick :exec
-INSERT INTO clicks (link_id, trakyo_id, ip_hash, user_agent)
-VALUES ($1, $2, $3, $4)
+const addVideoCost = `-- name: AddVideoCost :one
+INSERT INTO video_costs (video_id, kind, amount_cents, note, incurred_on)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, video_id, kind, amount_cents, note, incurred_on, created_at
 `
 
-type InsertClickParams struct {
-	LinkID    pgtype.UUID
-	TrakyoID  string
-	IpHash    pgtype.Text
-	UserAgent pgtype.Text
+type AddVideoCostParams struct {
+	VideoID     uuid.UUID   `json:"video_id"`
+	Kind        string      `json:"kind"`
+	AmountCents int64       `json:"amount_cents"`
+	Note        string      `json:"note"`
+	IncurredOn  pgtype.Date `json:"incurred_on"`
 }
 
-func (q *Queries) InsertClick(ctx context.Context, arg InsertClickParams) error {
-	_, err := q.db.Exec(ctx, insertClick,
+func (q *Queries) AddVideoCost(ctx context.Context, arg AddVideoCostParams) (VideoCost, error) {
+	row := q.db.QueryRow(ctx, addVideoCost,
+		arg.VideoID,
+		arg.Kind,
+		arg.AmountCents,
+		arg.Note,
+		arg.IncurredOn,
+	)
+	var i VideoCost
+	err := row.Scan(
+		&i.ID,
+		&i.VideoID,
+		&i.Kind,
+		&i.AmountCents,
+		&i.Note,
+		&i.IncurredOn,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const cancelSubscription = `-- name: CancelSubscription :exec
+UPDATE subscriptions
+SET status = 'canceled', canceled_at = now()
+WHERE client_id = $1 AND external_id = $2
+`
+
+type CancelSubscriptionParams struct {
+	ClientID   uuid.UUID `json:"client_id"`
+	ExternalID string    `json:"external_id"`
+}
+
+func (q *Queries) CancelSubscription(ctx context.Context, arg CancelSubscriptionParams) error {
+	_, err := q.db.Exec(ctx, cancelSubscription, arg.ClientID, arg.ExternalID)
+	return err
+}
+
+const clicksByDay = `-- name: ClicksByDay :many
+SELECT date_trunc('day', k.created_at)::timestamptz AS day, COUNT(*)::bigint AS clicks
+FROM clicks k
+WHERE k.client_id = $1 AND NOT k.is_bot
+  AND k.created_at >= $2 AND k.created_at < $3
+GROUP BY 1
+ORDER BY 1
+`
+
+type ClicksByDayParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	FromTs   time.Time `json:"from_ts"`
+	ToTs     time.Time `json:"to_ts"`
+}
+
+type ClicksByDayRow struct {
+	Day    time.Time `json:"day"`
+	Clicks int64     `json:"clicks"`
+}
+
+func (q *Queries) ClicksByDay(ctx context.Context, arg ClicksByDayParams) ([]ClicksByDayRow, error) {
+	rows, err := q.db.Query(ctx, clicksByDay, arg.ClientID, arg.FromTs, arg.ToTs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClicksByDayRow
+	for rows.Next() {
+		var i ClicksByDayRow
+		if err := rows.Scan(&i.Day, &i.Clicks); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countUsers = `-- name: CountUsers :one
+SELECT COUNT(*)::bigint FROM users
+`
+
+func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsers)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const createClient = `-- name: CreateClient :one
+
+INSERT INTO clients (workspace_id, name, contact_email, timezone, currency)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, name, contact_email, timezone, currency, created_at
+`
+
+type CreateClientParams struct {
+	WorkspaceID  uuid.UUID `json:"workspace_id"`
+	Name         string    `json:"name"`
+	ContactEmail string    `json:"contact_email"`
+	Timezone     string    `json:"timezone"`
+	Currency     string    `json:"currency"`
+}
+
+// ===== Clients =====
+func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) (Client, error) {
+	row := q.db.QueryRow(ctx, createClient,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.ContactEmail,
+		arg.Timezone,
+		arg.Currency,
+	)
+	var i Client
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.ContactEmail,
+		&i.Timezone,
+		&i.Currency,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createIntegration = `-- name: CreateIntegration :one
+INSERT INTO integrations (client_id, provider, webhook_secret_enc)
+VALUES ($1, $2, $3)
+RETURNING id, provider, is_active, (webhook_secret_enc IS NOT NULL)::boolean AS has_secret, created_at
+`
+
+type CreateIntegrationParams struct {
+	ClientID         uuid.UUID `json:"client_id"`
+	Provider         string    `json:"provider"`
+	WebhookSecretEnc []byte    `json:"webhook_secret_enc"`
+}
+
+type CreateIntegrationRow struct {
+	ID        uuid.UUID `json:"id"`
+	Provider  string    `json:"provider"`
+	IsActive  bool      `json:"is_active"`
+	HasSecret bool      `json:"has_secret"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) CreateIntegration(ctx context.Context, arg CreateIntegrationParams) (CreateIntegrationRow, error) {
+	row := q.db.QueryRow(ctx, createIntegration, arg.ClientID, arg.Provider, arg.WebhookSecretEnc)
+	var i CreateIntegrationRow
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.IsActive,
+		&i.HasSecret,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createInvitation = `-- name: CreateInvitation :one
+
+INSERT INTO invitations (workspace_id, client_id, email, token_hash, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, client_id, email, token_hash, expires_at, accepted_at, created_at
+`
+
+type CreateInvitationParams struct {
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	ClientID    uuid.UUID `json:"client_id"`
+	Email       string    `json:"email"`
+	TokenHash   string    `json:"token_hash"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+// ===== Invitations =====
+func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error) {
+	row := q.db.QueryRow(ctx, createInvitation,
+		arg.WorkspaceID,
+		arg.ClientID,
+		arg.Email,
+		arg.TokenHash,
+		arg.ExpiresAt,
+	)
+	var i Invitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ClientID,
+		&i.Email,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createLink = `-- name: CreateLink :one
+
+INSERT INTO tracking_links (client_id, video_id, domain_id, slug, name, target_url, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, client_id, video_id, domain_id, slug, name, target_url, is_active, expires_at, created_at, updated_at
+`
+
+type CreateLinkParams struct {
+	ClientID  uuid.UUID     `json:"client_id"`
+	VideoID   uuid.NullUUID `json:"video_id"`
+	DomainID  uuid.NullUUID `json:"domain_id"`
+	Slug      string        `json:"slug"`
+	Name      string        `json:"name"`
+	TargetUrl string        `json:"target_url"`
+	ExpiresAt *time.Time    `json:"expires_at"`
+}
+
+// ===== Links (always pass client_id so a client can't touch another's links) =====
+func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (TrackingLink, error) {
+	row := q.db.QueryRow(ctx, createLink,
+		arg.ClientID,
+		arg.VideoID,
+		arg.DomainID,
+		arg.Slug,
+		arg.Name,
+		arg.TargetUrl,
+		arg.ExpiresAt,
+	)
+	var i TrackingLink
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.VideoID,
+		&i.DomainID,
+		&i.Slug,
+		&i.Name,
+		&i.TargetUrl,
+		&i.IsActive,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createMembership = `-- name: CreateMembership :one
+INSERT INTO memberships (workspace_id, user_id, role, client_id)
+VALUES ($1, $2, $3, $4)
+RETURNING id, workspace_id, user_id, role, client_id, created_at
+`
+
+type CreateMembershipParams struct {
+	WorkspaceID uuid.UUID     `json:"workspace_id"`
+	UserID      uuid.UUID     `json:"user_id"`
+	Role        string        `json:"role"`
+	ClientID    uuid.NullUUID `json:"client_id"`
+}
+
+func (q *Queries) CreateMembership(ctx context.Context, arg CreateMembershipParams) (Membership, error) {
+	row := q.db.QueryRow(ctx, createMembership,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.Role,
+		arg.ClientID,
+	)
+	var i Membership
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.ClientID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createUser = `-- name: CreateUser :one
+
+INSERT INTO users (email, password_hash, name)
+VALUES ($1, $2, $3)
+RETURNING id, email, password_hash, name, created_at
+`
+
+type CreateUserParams struct {
+	Email        string `json:"email"`
+	PasswordHash string `json:"password_hash"`
+	Name         string `json:"name"`
+}
+
+// ===== Auth =====
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.PasswordHash, arg.Name)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createWorkspace = `-- name: CreateWorkspace :one
+INSERT INTO workspaces (name) VALUES ($1) RETURNING id, name, created_at
+`
+
+func (q *Queries) CreateWorkspace(ctx context.Context, name string) (Workspace, error) {
+	row := q.db.QueryRow(ctx, createWorkspace, name)
+	var i Workspace
+	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	return i, err
+}
+
+const deleteIntegration = `-- name: DeleteIntegration :execrows
+DELETE FROM integrations WHERE id = $1 AND client_id = $2
+`
+
+type DeleteIntegrationParams struct {
+	ID       uuid.UUID `json:"id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+func (q *Queries) DeleteIntegration(ctx context.Context, arg DeleteIntegrationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteIntegration, arg.ID, arg.ClientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteLink = `-- name: DeleteLink :one
+DELETE FROM tracking_links WHERE id = $1 AND client_id = $2 RETURNING slug
+`
+
+type DeleteLinkParams struct {
+	ID       uuid.UUID `json:"id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+func (q *Queries) DeleteLink(ctx context.Context, arg DeleteLinkParams) (string, error) {
+	row := q.db.QueryRow(ctx, deleteLink, arg.ID, arg.ClientID)
+	var slug string
+	err := row.Scan(&slug)
+	return slug, err
+}
+
+const deleteVideoCost = `-- name: DeleteVideoCost :one
+DELETE FROM video_costs vc
+USING videos v
+WHERE vc.id = $1 AND vc.video_id = v.id AND v.client_id = $2
+RETURNING vc.id
+`
+
+type DeleteVideoCostParams struct {
+	ID       uuid.UUID `json:"id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+// Tenant-scoped delete: joins to videos so a cost can't be deleted via a
+// guessed id unless it belongs to a video owned by this client.
+func (q *Queries) DeleteVideoCost(ctx context.Context, arg DeleteVideoCostParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteVideoCost, arg.ID, arg.ClientID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteYoutubeChannel = `-- name: DeleteYoutubeChannel :execrows
+DELETE FROM youtube_channels WHERE id = $1 AND client_id = $2
+`
+
+type DeleteYoutubeChannelParams struct {
+	ID       uuid.UUID `json:"id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+func (q *Queries) DeleteYoutubeChannel(ctx context.Context, arg DeleteYoutubeChannelParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteYoutubeChannel, arg.ID, arg.ClientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const findClickIDByEmail = `-- name: FindClickIDByEmail :one
+SELECT c.id, c.link_id, c.video_id, c.trakyo_id
+FROM identities i
+JOIN clicks c ON c.trakyo_id = i.trakyo_id
+WHERE i.client_id = $1 AND i.email = $2
+ORDER BY c.created_at DESC
+LIMIT 1
+`
+
+type FindClickIDByEmailParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	Email    string    `json:"email"`
+}
+
+type FindClickIDByEmailRow struct {
+	ID       int64         `json:"id"`
+	LinkID   uuid.UUID     `json:"link_id"`
+	VideoID  uuid.NullUUID `json:"video_id"`
+	TrakyoID string        `json:"trakyo_id"`
+}
+
+// Email fallback: most recent click linked to this email.
+func (q *Queries) FindClickIDByEmail(ctx context.Context, arg FindClickIDByEmailParams) (FindClickIDByEmailRow, error) {
+	row := q.db.QueryRow(ctx, findClickIDByEmail, arg.ClientID, arg.Email)
+	var i FindClickIDByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.VideoID,
+		&i.TrakyoID,
+	)
+	return i, err
+}
+
+const findConversionByPayment = `-- name: FindConversionByPayment :one
+SELECT cv.click_id, cv.link_id, cv.video_id, cv.subscription_id, cv.trakyo_id, cv.email, cv.attribution_method
+FROM conversions cv
+WHERE cv.client_id = $1
+  AND cv.source = 'stripe'
+  AND cv.event_type <> 'refund'
+  AND (cv.raw->>'payment_intent' = $2::text
+       OR cv.raw->>'charge' = $3::text)
+ORDER BY cv.occurred_at
+LIMIT 1
+`
+
+type FindConversionByPaymentParams struct {
+	ClientID      uuid.UUID `json:"client_id"`
+	PaymentIntent string    `json:"payment_intent"`
+	Charge        string    `json:"charge"`
+}
+
+type FindConversionByPaymentRow struct {
+	ClickID           pgtype.Int8   `json:"click_id"`
+	LinkID            uuid.NullUUID `json:"link_id"`
+	VideoID           uuid.NullUUID `json:"video_id"`
+	SubscriptionID    uuid.NullUUID `json:"subscription_id"`
+	TrakyoID          string        `json:"trakyo_id"`
+	Email             string        `json:"email"`
+	AttributionMethod string        `json:"attribution_method"`
+}
+
+// Refunds inherit attribution from the original payment (matched via the stored Stripe object).
+func (q *Queries) FindConversionByPayment(ctx context.Context, arg FindConversionByPaymentParams) (FindConversionByPaymentRow, error) {
+	row := q.db.QueryRow(ctx, findConversionByPayment, arg.ClientID, arg.PaymentIntent, arg.Charge)
+	var i FindConversionByPaymentRow
+	err := row.Scan(
+		&i.ClickID,
+		&i.LinkID,
+		&i.VideoID,
+		&i.SubscriptionID,
+		&i.TrakyoID,
+		&i.Email,
+		&i.AttributionMethod,
+	)
+	return i, err
+}
+
+const getChannelForSync = `-- name: GetChannelForSync :one
+SELECT id, client_id, google_channel_id, refresh_token_enc
+FROM youtube_channels
+WHERE id = $1 AND client_id = $2 AND status = 'connected' AND refresh_token_enc IS NOT NULL
+`
+
+type GetChannelForSyncParams struct {
+	ID       uuid.UUID `json:"id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+type GetChannelForSyncRow struct {
+	ID              uuid.UUID `json:"id"`
+	ClientID        uuid.UUID `json:"client_id"`
+	GoogleChannelID string    `json:"google_channel_id"`
+	RefreshTokenEnc []byte    `json:"refresh_token_enc"`
+}
+
+func (q *Queries) GetChannelForSync(ctx context.Context, arg GetChannelForSyncParams) (GetChannelForSyncRow, error) {
+	row := q.db.QueryRow(ctx, getChannelForSync, arg.ID, arg.ClientID)
+	var i GetChannelForSyncRow
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.GoogleChannelID,
+		&i.RefreshTokenEnc,
+	)
+	return i, err
+}
+
+const getClickByTrakyoID = `-- name: GetClickByTrakyoID :one
+SELECT id, link_id, client_id, video_id, trakyo_id, created_at
+FROM clicks
+WHERE trakyo_id = $1
+`
+
+type GetClickByTrakyoIDRow struct {
+	ID        int64         `json:"id"`
+	LinkID    uuid.UUID     `json:"link_id"`
+	ClientID  uuid.UUID     `json:"client_id"`
+	VideoID   uuid.NullUUID `json:"video_id"`
+	TrakyoID  string        `json:"trakyo_id"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
+func (q *Queries) GetClickByTrakyoID(ctx context.Context, trakyoID string) (GetClickByTrakyoIDRow, error) {
+	row := q.db.QueryRow(ctx, getClickByTrakyoID, trakyoID)
+	var i GetClickByTrakyoIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.ClientID,
+		&i.VideoID,
+		&i.TrakyoID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getClickForClient = `-- name: GetClickForClient :one
+
+SELECT k.id, k.link_id, k.video_id, k.trakyo_id
+FROM clicks k
+WHERE k.trakyo_id = $1 AND k.client_id = $2
+`
+
+type GetClickForClientParams struct {
+	TrakyoID string    `json:"trakyo_id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+type GetClickForClientRow struct {
+	ID       int64         `json:"id"`
+	LinkID   uuid.UUID     `json:"link_id"`
+	VideoID  uuid.NullUUID `json:"video_id"`
+	TrakyoID string        `json:"trakyo_id"`
+}
+
+// ===== Attribution =====
+// Tenant-scoped: a trakyo_id from another client's click must never attribute.
+func (q *Queries) GetClickForClient(ctx context.Context, arg GetClickForClientParams) (GetClickForClientRow, error) {
+	row := q.db.QueryRow(ctx, getClickForClient, arg.TrakyoID, arg.ClientID)
+	var i GetClickForClientRow
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.VideoID,
+		&i.TrakyoID,
+	)
+	return i, err
+}
+
+const getClient = `-- name: GetClient :one
+SELECT id, workspace_id, name, contact_email, timezone, currency, created_at FROM clients WHERE id = $1 AND workspace_id = $2
+`
+
+type GetClientParams struct {
+	ID          uuid.UUID `json:"id"`
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (Client, error) {
+	row := q.db.QueryRow(ctx, getClient, arg.ID, arg.WorkspaceID)
+	var i Client
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.ContactEmail,
+		&i.Timezone,
+		&i.Currency,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getClientOverview = `-- name: GetClientOverview :one
+
+SELECT
+    (SELECT COUNT(*) FROM clicks k
+      WHERE k.client_id = $1 AND NOT k.is_bot
+        AND k.created_at >= $2 AND k.created_at < $3)::bigint AS clicks,
+    (SELECT COUNT(DISTINCT k.ip_hash) FROM clicks k
+      WHERE k.client_id = $1 AND NOT k.is_bot
+        AND k.created_at >= $2 AND k.created_at < $3)::bigint AS unique_visitors,
+    (SELECT COUNT(*) FROM conversions cv
+      WHERE cv.client_id = $1 AND cv.event_type <> 'refund'
+        AND cv.occurred_at >= $2 AND cv.occurred_at < $3)::bigint AS conversions,
+    (SELECT COALESCE(SUM(cv.amount_cents), 0) FROM conversions cv
+      WHERE cv.client_id = $1
+        AND cv.occurred_at >= $2 AND cv.occurred_at < $3)::bigint AS revenue_cents,
+    (SELECT COALESCE(SUM(vc.amount_cents), 0) FROM video_costs vc
+      JOIN videos v ON v.id = vc.video_id
+      WHERE v.client_id = $1
+        AND vc.incurred_on >= $2::date AND vc.incurred_on < $3::date)::bigint AS cost_cents,
+    (SELECT COALESCE(SUM(vc.amount_cents), 0) FROM video_costs vc
+      JOIN videos v ON v.id = vc.video_id
+      WHERE v.client_id = $1)::bigint AS lifetime_cost_cents
+`
+
+type GetClientOverviewParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	FromTs   time.Time `json:"from_ts"`
+	ToTs     time.Time `json:"to_ts"`
+}
+
+type GetClientOverviewRow struct {
+	Clicks            int64 `json:"clicks"`
+	UniqueVisitors    int64 `json:"unique_visitors"`
+	Conversions       int64 `json:"conversions"`
+	RevenueCents      int64 `json:"revenue_cents"`
+	CostCents         int64 `json:"cost_cents"`
+	LifetimeCostCents int64 `json:"lifetime_cost_cents"`
+}
+
+// ===== Analytics =====
+// Columns are table-qualified everywhere: sqlc reports "ambiguous" otherwise.
+func (q *Queries) GetClientOverview(ctx context.Context, arg GetClientOverviewParams) (GetClientOverviewRow, error) {
+	row := q.db.QueryRow(ctx, getClientOverview, arg.ClientID, arg.FromTs, arg.ToTs)
+	var i GetClientOverviewRow
+	err := row.Scan(
+		&i.Clicks,
+		&i.UniqueVisitors,
+		&i.Conversions,
+		&i.RevenueCents,
+		&i.CostCents,
+		&i.LifetimeCostCents,
+	)
+	return i, err
+}
+
+const getConversionBySourceExternalID = `-- name: GetConversionBySourceExternalID :one
+
+SELECT id, click_id, link_id, video_id, trakyo_id, email, attribution_method
+FROM conversions
+WHERE client_id = $1 AND source = $2 AND external_id = $3
+`
+
+type GetConversionBySourceExternalIDParams struct {
+	ClientID   uuid.UUID `json:"client_id"`
+	Source     string    `json:"source"`
+	ExternalID string    `json:"external_id"`
+}
+
+type GetConversionBySourceExternalIDRow struct {
+	ID                int64         `json:"id"`
+	ClickID           pgtype.Int8   `json:"click_id"`
+	LinkID            uuid.NullUUID `json:"link_id"`
+	VideoID           uuid.NullUUID `json:"video_id"`
+	TrakyoID          string        `json:"trakyo_id"`
+	Email             string        `json:"email"`
+	AttributionMethod string        `json:"attribution_method"`
+}
+
+// ===== Calendly reschedule handling =====
+// A reschedule fires a new invitee.created with a new invitee uri; we need
+// to find the conversion row for the invitee it replaced so we can update
+// it in place instead of double-counting the booking.
+func (q *Queries) GetConversionBySourceExternalID(ctx context.Context, arg GetConversionBySourceExternalIDParams) (GetConversionBySourceExternalIDRow, error) {
+	row := q.db.QueryRow(ctx, getConversionBySourceExternalID, arg.ClientID, arg.Source, arg.ExternalID)
+	var i GetConversionBySourceExternalIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ClickID,
+		&i.LinkID,
+		&i.VideoID,
+		&i.TrakyoID,
+		&i.Email,
+		&i.AttributionMethod,
+	)
+	return i, err
+}
+
+const getIntegrationForWebhook = `-- name: GetIntegrationForWebhook :one
+SELECT id, client_id, provider, webhook_secret_enc, is_active
+FROM integrations
+WHERE id = $1
+`
+
+type GetIntegrationForWebhookRow struct {
+	ID               uuid.UUID `json:"id"`
+	ClientID         uuid.UUID `json:"client_id"`
+	Provider         string    `json:"provider"`
+	WebhookSecretEnc []byte    `json:"webhook_secret_enc"`
+	IsActive         bool      `json:"is_active"`
+}
+
+// Public webhook lookup (no tenant context; the URL id is the credential, the signature is the proof).
+func (q *Queries) GetIntegrationForWebhook(ctx context.Context, id uuid.UUID) (GetIntegrationForWebhookRow, error) {
+	row := q.db.QueryRow(ctx, getIntegrationForWebhook, id)
+	var i GetIntegrationForWebhookRow
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.Provider,
+		&i.WebhookSecretEnc,
+		&i.IsActive,
+	)
+	return i, err
+}
+
+const getInvitationByTokenHash = `-- name: GetInvitationByTokenHash :one
+SELECT i.id, i.workspace_id, i.client_id, i.email, i.expires_at, i.accepted_at, c.name AS client_name
+FROM invitations i
+JOIN clients c ON c.id = i.client_id
+WHERE i.token_hash = $1
+`
+
+type GetInvitationByTokenHashRow struct {
+	ID          uuid.UUID  `json:"id"`
+	WorkspaceID uuid.UUID  `json:"workspace_id"`
+	ClientID    uuid.UUID  `json:"client_id"`
+	Email       string     `json:"email"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	AcceptedAt  *time.Time `json:"accepted_at"`
+	ClientName  string     `json:"client_name"`
+}
+
+func (q *Queries) GetInvitationByTokenHash(ctx context.Context, tokenHash string) (GetInvitationByTokenHashRow, error) {
+	row := q.db.QueryRow(ctx, getInvitationByTokenHash, tokenHash)
+	var i GetInvitationByTokenHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ClientID,
+		&i.Email,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.ClientName,
+	)
+	return i, err
+}
+
+const getLinkForRedirect = `-- name: GetLinkForRedirect :one
+
+SELECT id, client_id, video_id, target_url, is_active, expires_at
+FROM tracking_links
+WHERE slug = $1 AND domain_id IS NULL
+LIMIT 1
+`
+
+type GetLinkForRedirectRow struct {
+	ID        uuid.UUID     `json:"id"`
+	ClientID  uuid.UUID     `json:"client_id"`
+	VideoID   uuid.NullUUID `json:"video_id"`
+	TargetUrl string        `json:"target_url"`
+	IsActive  bool          `json:"is_active"`
+	ExpiresAt *time.Time    `json:"expires_at"`
+}
+
+// ===== Redirect engine =====
+func (q *Queries) GetLinkForRedirect(ctx context.Context, slug string) (GetLinkForRedirectRow, error) {
+	row := q.db.QueryRow(ctx, getLinkForRedirect, slug)
+	var i GetLinkForRedirectRow
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.VideoID,
+		&i.TargetUrl,
+		&i.IsActive,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const getSubscriptionByExternalID = `-- name: GetSubscriptionByExternalID :one
+SELECT s.id, s.click_id, s.link_id, s.video_id, s.customer_email
+FROM subscriptions s
+WHERE s.client_id = $1 AND s.external_id = $2
+`
+
+type GetSubscriptionByExternalIDParams struct {
+	ClientID   uuid.UUID `json:"client_id"`
+	ExternalID string    `json:"external_id"`
+}
+
+type GetSubscriptionByExternalIDRow struct {
+	ID            uuid.UUID     `json:"id"`
+	ClickID       pgtype.Int8   `json:"click_id"`
+	LinkID        uuid.NullUUID `json:"link_id"`
+	VideoID       uuid.NullUUID `json:"video_id"`
+	CustomerEmail string        `json:"customer_email"`
+}
+
+func (q *Queries) GetSubscriptionByExternalID(ctx context.Context, arg GetSubscriptionByExternalIDParams) (GetSubscriptionByExternalIDRow, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByExternalID, arg.ClientID, arg.ExternalID)
+	var i GetSubscriptionByExternalIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ClickID,
+		&i.LinkID,
+		&i.VideoID,
+		&i.CustomerEmail,
+	)
+	return i, err
+}
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, email, password_hash, name, created_at FROM users WHERE email = $1
+`
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+SELECT id, email, password_hash, name, created_at FROM users WHERE id = $1
+`
+
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getVideo = `-- name: GetVideo :one
+SELECT id, client_id, channel_id, youtube_video_id, title, thumbnail_url, published_at, created_at FROM videos WHERE id = $1 AND client_id = $2
+`
+
+type GetVideoParams struct {
+	ID       uuid.UUID `json:"id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+func (q *Queries) GetVideo(ctx context.Context, arg GetVideoParams) (Video, error) {
+	row := q.db.QueryRow(ctx, getVideo, arg.ID, arg.ClientID)
+	var i Video
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.ChannelID,
+		&i.YoutubeVideoID,
+		&i.Title,
+		&i.ThumbnailUrl,
+		&i.PublishedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+type InsertClicksParams struct {
+	LinkID     uuid.UUID     `json:"link_id"`
+	VariantID  uuid.NullUUID `json:"variant_id"`
+	ClientID   uuid.UUID     `json:"client_id"`
+	VideoID    uuid.NullUUID `json:"video_id"`
+	TrakyoID   string        `json:"trakyo_id"`
+	IpHash     string        `json:"ip_hash"`
+	UserAgent  string        `json:"user_agent"`
+	Referrer   string        `json:"referrer"`
+	Country    string        `json:"country"`
+	DeviceType string        `json:"device_type"`
+	Browser    string        `json:"browser"`
+	Os         string        `json:"os"`
+	IsBot      bool          `json:"is_bot"`
+}
+
+const insertConversion = `-- name: InsertConversion :one
+
+INSERT INTO conversions (
+    client_id, click_id, link_id, video_id, subscription_id, trakyo_id, source,
+    event_type, external_id, amount_cents, currency, email, attribution_method, raw, occurred_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+ON CONFLICT (client_id, source, external_id) DO NOTHING
+RETURNING id
+`
+
+type InsertConversionParams struct {
+	ClientID          uuid.UUID     `json:"client_id"`
+	ClickID           pgtype.Int8   `json:"click_id"`
+	LinkID            uuid.NullUUID `json:"link_id"`
+	VideoID           uuid.NullUUID `json:"video_id"`
+	SubscriptionID    uuid.NullUUID `json:"subscription_id"`
+	TrakyoID          string        `json:"trakyo_id"`
+	Source            string        `json:"source"`
+	EventType         string        `json:"event_type"`
+	ExternalID        string        `json:"external_id"`
+	AmountCents       int64         `json:"amount_cents"`
+	Currency          string        `json:"currency"`
+	Email             string        `json:"email"`
+	AttributionMethod string        `json:"attribution_method"`
+	Raw               []byte        `json:"raw"`
+	OccurredAt        time.Time     `json:"occurred_at"`
+}
+
+// ===== Conversions =====
+// Returns no row (pgx.ErrNoRows) if the event was already ingested -> idempotent.
+func (q *Queries) InsertConversion(ctx context.Context, arg InsertConversionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertConversion,
+		arg.ClientID,
+		arg.ClickID,
 		arg.LinkID,
+		arg.VideoID,
+		arg.SubscriptionID,
 		arg.TrakyoID,
-		arg.IpHash,
-		arg.UserAgent,
+		arg.Source,
+		arg.EventType,
+		arg.ExternalID,
+		arg.AmountCents,
+		arg.Currency,
+		arg.Email,
+		arg.AttributionMethod,
+		arg.Raw,
+		arg.OccurredAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listActiveVariants = `-- name: ListActiveVariants :many
+SELECT id, target_url, weight
+FROM link_variants
+WHERE link_id = $1 AND is_active
+ORDER BY created_at
+`
+
+type ListActiveVariantsRow struct {
+	ID        uuid.UUID `json:"id"`
+	TargetUrl string    `json:"target_url"`
+	Weight    int32     `json:"weight"`
+}
+
+func (q *Queries) ListActiveVariants(ctx context.Context, linkID uuid.UUID) ([]ListActiveVariantsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveVariants, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveVariantsRow
+	for rows.Next() {
+		var i ListActiveVariantsRow
+		if err := rows.Scan(&i.ID, &i.TargetUrl, &i.Weight); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelsByClient = `-- name: ListChannelsByClient :many
+SELECT id, client_id, google_channel_id, title, thumbnail_url, status, connected_at, last_synced_at
+FROM youtube_channels
+WHERE client_id = $1
+`
+
+type ListChannelsByClientRow struct {
+	ID              uuid.UUID  `json:"id"`
+	ClientID        uuid.UUID  `json:"client_id"`
+	GoogleChannelID string     `json:"google_channel_id"`
+	Title           string     `json:"title"`
+	ThumbnailUrl    string     `json:"thumbnail_url"`
+	Status          string     `json:"status"`
+	ConnectedAt     time.Time  `json:"connected_at"`
+	LastSyncedAt    *time.Time `json:"last_synced_at"`
+}
+
+func (q *Queries) ListChannelsByClient(ctx context.Context, clientID uuid.UUID) ([]ListChannelsByClientRow, error) {
+	rows, err := q.db.Query(ctx, listChannelsByClient, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChannelsByClientRow
+	for rows.Next() {
+		var i ListChannelsByClientRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientID,
+			&i.GoogleChannelID,
+			&i.Title,
+			&i.ThumbnailUrl,
+			&i.Status,
+			&i.ConnectedAt,
+			&i.LastSyncedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelsToSync = `-- name: ListChannelsToSync :many
+
+SELECT id, client_id, google_channel_id, refresh_token_enc
+FROM youtube_channels
+WHERE status = 'connected' AND refresh_token_enc IS NOT NULL
+`
+
+type ListChannelsToSyncRow struct {
+	ID              uuid.UUID `json:"id"`
+	ClientID        uuid.UUID `json:"client_id"`
+	GoogleChannelID string    `json:"google_channel_id"`
+	RefreshTokenEnc []byte    `json:"refresh_token_enc"`
+}
+
+// ===== YouTube Sync =====
+func (q *Queries) ListChannelsToSync(ctx context.Context) ([]ListChannelsToSyncRow, error) {
+	rows, err := q.db.Query(ctx, listChannelsToSync)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChannelsToSyncRow
+	for rows.Next() {
+		var i ListChannelsToSyncRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientID,
+			&i.GoogleChannelID,
+			&i.RefreshTokenEnc,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listClientsByWorkspace = `-- name: ListClientsByWorkspace :many
+SELECT id, workspace_id, name, contact_email, timezone, currency, created_at FROM clients WHERE workspace_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListClientsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]Client, error) {
+	rows, err := q.db.Query(ctx, listClientsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Client
+	for rows.Next() {
+		var i Client
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.ContactEmail,
+			&i.Timezone,
+			&i.Currency,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConversionsByClient = `-- name: ListConversionsByClient :many
+
+SELECT cv.id, cv.event_type, cv.source, cv.amount_cents, cv.currency, cv.email,
+       cv.attribution_method, cv.occurred_at, cv.link_id,
+       COALESCE(tl.slug, '')::text AS link_slug,
+       COALESCE(tl.name, '')::text AS link_name
+FROM conversions cv
+LEFT JOIN tracking_links tl ON tl.id = cv.link_id
+WHERE cv.client_id = $1
+ORDER BY cv.occurred_at DESC
+LIMIT $2
+`
+
+type ListConversionsByClientParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	RowLimit int32     `json:"row_limit"`
+}
+
+type ListConversionsByClientRow struct {
+	ID                int64         `json:"id"`
+	EventType         string        `json:"event_type"`
+	Source            string        `json:"source"`
+	AmountCents       int64         `json:"amount_cents"`
+	Currency          string        `json:"currency"`
+	Email             string        `json:"email"`
+	AttributionMethod string        `json:"attribution_method"`
+	OccurredAt        time.Time     `json:"occurred_at"`
+	LinkID            uuid.NullUUID `json:"link_id"`
+	LinkSlug          string        `json:"link_slug"`
+	LinkName          string        `json:"link_name"`
+}
+
+// ===== Conversions list (dashboard) =====
+func (q *Queries) ListConversionsByClient(ctx context.Context, arg ListConversionsByClientParams) ([]ListConversionsByClientRow, error) {
+	rows, err := q.db.Query(ctx, listConversionsByClient, arg.ClientID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListConversionsByClientRow
+	for rows.Next() {
+		var i ListConversionsByClientRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Source,
+			&i.AmountCents,
+			&i.Currency,
+			&i.Email,
+			&i.AttributionMethod,
+			&i.OccurredAt,
+			&i.LinkID,
+			&i.LinkSlug,
+			&i.LinkName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIntegrationsByClient = `-- name: ListIntegrationsByClient :many
+
+SELECT i.id, i.provider, i.is_active, (i.webhook_secret_enc IS NOT NULL)::boolean AS has_secret, i.created_at
+FROM integrations i
+WHERE i.client_id = $1
+ORDER BY i.created_at
+`
+
+type ListIntegrationsByClientRow struct {
+	ID        uuid.UUID `json:"id"`
+	Provider  string    `json:"provider"`
+	IsActive  bool      `json:"is_active"`
+	HasSecret bool      `json:"has_secret"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ===== Integrations =====
+func (q *Queries) ListIntegrationsByClient(ctx context.Context, clientID uuid.UUID) ([]ListIntegrationsByClientRow, error) {
+	rows, err := q.db.Query(ctx, listIntegrationsByClient, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListIntegrationsByClientRow
+	for rows.Next() {
+		var i ListIntegrationsByClientRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Provider,
+			&i.IsActive,
+			&i.HasSecret,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInvitationsByClient = `-- name: ListInvitationsByClient :many
+SELECT id, email, expires_at, accepted_at, created_at
+FROM invitations
+WHERE client_id = $1
+ORDER BY created_at DESC
+`
+
+type ListInvitationsByClientRow struct {
+	ID         uuid.UUID  `json:"id"`
+	Email      string     `json:"email"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	AcceptedAt *time.Time `json:"accepted_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+func (q *Queries) ListInvitationsByClient(ctx context.Context, clientID uuid.UUID) ([]ListInvitationsByClientRow, error) {
+	rows, err := q.db.Query(ctx, listInvitationsByClient, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInvitationsByClientRow
+	for rows.Next() {
+		var i ListInvitationsByClientRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.ExpiresAt,
+			&i.AcceptedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLinksByClient = `-- name: ListLinksByClient :many
+SELECT id, client_id, video_id, domain_id, slug, name, target_url, is_active, expires_at, created_at, updated_at FROM tracking_links WHERE client_id = $1 ORDER BY created_at DESC
+`
+
+func (q *Queries) ListLinksByClient(ctx context.Context, clientID uuid.UUID) ([]TrackingLink, error) {
+	rows, err := q.db.Query(ctx, listLinksByClient, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TrackingLink
+	for rows.Next() {
+		var i TrackingLink
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientID,
+			&i.VideoID,
+			&i.DomainID,
+			&i.Slug,
+			&i.Name,
+			&i.TargetUrl,
+			&i.IsActive,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMembershipsByUser = `-- name: ListMembershipsByUser :many
+SELECT m.id, m.workspace_id, m.role, m.client_id, w.name AS workspace_name
+FROM memberships m
+JOIN workspaces w ON w.id = m.workspace_id
+WHERE m.user_id = $1
+`
+
+type ListMembershipsByUserRow struct {
+	ID            uuid.UUID     `json:"id"`
+	WorkspaceID   uuid.UUID     `json:"workspace_id"`
+	Role          string        `json:"role"`
+	ClientID      uuid.NullUUID `json:"client_id"`
+	WorkspaceName string        `json:"workspace_name"`
+}
+
+func (q *Queries) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]ListMembershipsByUserRow, error) {
+	rows, err := q.db.Query(ctx, listMembershipsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMembershipsByUserRow
+	for rows.Next() {
+		var i ListMembershipsByUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Role,
+			&i.ClientID,
+			&i.WorkspaceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideoCostsByVideo = `-- name: ListVideoCostsByVideo :many
+SELECT id, video_id, kind, amount_cents, note, incurred_on, created_at FROM video_costs WHERE video_id = $1 ORDER BY incurred_on DESC, created_at DESC
+`
+
+func (q *Queries) ListVideoCostsByVideo(ctx context.Context, videoID uuid.UUID) ([]VideoCost, error) {
+	rows, err := q.db.Query(ctx, listVideoCostsByVideo, videoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []VideoCost
+	for rows.Next() {
+		var i VideoCost
+		if err := rows.Scan(
+			&i.ID,
+			&i.VideoID,
+			&i.Kind,
+			&i.AmountCents,
+			&i.Note,
+			&i.IncurredOn,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideosByClient = `-- name: ListVideosByClient :many
+
+SELECT id, client_id, channel_id, youtube_video_id, title, thumbnail_url, published_at, created_at FROM videos WHERE client_id = $1 ORDER BY published_at DESC NULLS LAST
+`
+
+// ===== Videos =====
+func (q *Queries) ListVideosByClient(ctx context.Context, clientID uuid.UUID) ([]Video, error) {
+	rows, err := q.db.Query(ctx, listVideosByClient, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Video
+	for rows.Next() {
+		var i Video
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientID,
+			&i.ChannelID,
+			&i.YoutubeVideoID,
+			&i.Title,
+			&i.ThumbnailUrl,
+			&i.PublishedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideosWithCostsByClient = `-- name: ListVideosWithCostsByClient :many
+
+SELECT
+    v.id, v.client_id, v.channel_id, v.youtube_video_id, v.title, v.thumbnail_url,
+    v.published_at, v.created_at,
+    COALESCE(SUM(vc.amount_cents), 0)::bigint AS total_cost_cents,
+    COUNT(vc.id)::bigint AS cost_count
+FROM videos v
+LEFT JOIN video_costs vc ON vc.video_id = v.id
+WHERE v.client_id = $1
+GROUP BY v.id
+ORDER BY v.published_at DESC NULLS LAST, v.created_at DESC
+`
+
+type ListVideosWithCostsByClientRow struct {
+	ID             uuid.UUID     `json:"id"`
+	ClientID       uuid.UUID     `json:"client_id"`
+	ChannelID      uuid.NullUUID `json:"channel_id"`
+	YoutubeVideoID string        `json:"youtube_video_id"`
+	Title          string        `json:"title"`
+	ThumbnailUrl   string        `json:"thumbnail_url"`
+	PublishedAt    *time.Time    `json:"published_at"`
+	CreatedAt      time.Time     `json:"created_at"`
+	TotalCostCents int64         `json:"total_cost_cents"`
+	CostCount      int64         `json:"cost_count"`
+}
+
+// ===== Video costs =====
+func (q *Queries) ListVideosWithCostsByClient(ctx context.Context, clientID uuid.UUID) ([]ListVideosWithCostsByClientRow, error) {
+	rows, err := q.db.Query(ctx, listVideosWithCostsByClient, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVideosWithCostsByClientRow
+	for rows.Next() {
+		var i ListVideosWithCostsByClientRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientID,
+			&i.ChannelID,
+			&i.YoutubeVideoID,
+			&i.Title,
+			&i.ThumbnailUrl,
+			&i.PublishedAt,
+			&i.CreatedAt,
+			&i.TotalCostCents,
+			&i.CostCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markChannelRevoked = `-- name: MarkChannelRevoked :exec
+UPDATE youtube_channels SET status = 'revoked' WHERE id = $1
+`
+
+func (q *Queries) MarkChannelRevoked(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markChannelRevoked, id)
+	return err
+}
+
+const markInvitationAccepted = `-- name: MarkInvitationAccepted :execrows
+UPDATE invitations SET accepted_at = now() WHERE id = $1 AND accepted_at IS NULL
+`
+
+// Returns 0 rows affected if already accepted -> prevents double-accept races.
+func (q *Queries) MarkInvitationAccepted(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markInvitationAccepted, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setIntegrationSecret = `-- name: SetIntegrationSecret :execrows
+UPDATE integrations SET webhook_secret_enc = $3 WHERE id = $1 AND client_id = $2
+`
+
+type SetIntegrationSecretParams struct {
+	ID               uuid.UUID `json:"id"`
+	ClientID         uuid.UUID `json:"client_id"`
+	WebhookSecretEnc []byte    `json:"webhook_secret_enc"`
+}
+
+func (q *Queries) SetIntegrationSecret(ctx context.Context, arg SetIntegrationSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setIntegrationSecret, arg.ID, arg.ClientID, arg.WebhookSecretEnc)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateChannelSyncStatus = `-- name: UpdateChannelSyncStatus :exec
+UPDATE youtube_channels SET last_synced_at = now() WHERE id = $1
+`
+
+func (q *Queries) UpdateChannelSyncStatus(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, updateChannelSyncStatus, id)
+	return err
+}
+
+const updateConversionOnReschedule = `-- name: UpdateConversionOnReschedule :execrows
+UPDATE conversions
+SET external_id = $1, occurred_at = $2
+WHERE id = $3 AND client_id = $4
+`
+
+type UpdateConversionOnRescheduleParams struct {
+	NewExternalID string    `json:"new_external_id"`
+	OccurredAt    time.Time `json:"occurred_at"`
+	ID            int64     `json:"id"`
+	ClientID      uuid.UUID `json:"client_id"`
+}
+
+func (q *Queries) UpdateConversionOnReschedule(ctx context.Context, arg UpdateConversionOnRescheduleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateConversionOnReschedule,
+		arg.NewExternalID,
+		arg.OccurredAt,
+		arg.ID,
+		arg.ClientID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateLink = `-- name: UpdateLink :one
+UPDATE tracking_links
+SET name       = COALESCE($1, name),
+    target_url = COALESCE($2, target_url),
+    is_active  = COALESCE($3, is_active),
+    updated_at = now()
+WHERE id = $4 AND client_id = $5
+RETURNING id, client_id, video_id, domain_id, slug, name, target_url, is_active, expires_at, created_at, updated_at
+`
+
+type UpdateLinkParams struct {
+	Name      pgtype.Text `json:"name"`
+	TargetUrl pgtype.Text `json:"target_url"`
+	IsActive  pgtype.Bool `json:"is_active"`
+	ID        uuid.UUID   `json:"id"`
+	ClientID  uuid.UUID   `json:"client_id"`
+}
+
+func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (TrackingLink, error) {
+	row := q.db.QueryRow(ctx, updateLink,
+		arg.Name,
+		arg.TargetUrl,
+		arg.IsActive,
+		arg.ID,
+		arg.ClientID,
+	)
+	var i TrackingLink
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.VideoID,
+		&i.DomainID,
+		&i.Slug,
+		&i.Name,
+		&i.TargetUrl,
+		&i.IsActive,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertIdentity = `-- name: UpsertIdentity :exec
+INSERT INTO identities (client_id, email, trakyo_id)
+VALUES ($1, $2, $3)
+ON CONFLICT DO NOTHING
+`
+
+type UpsertIdentityParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	Email    string    `json:"email"`
+	TrakyoID string    `json:"trakyo_id"`
+}
+
+func (q *Queries) UpsertIdentity(ctx context.Context, arg UpsertIdentityParams) error {
+	_, err := q.db.Exec(ctx, upsertIdentity, arg.ClientID, arg.Email, arg.TrakyoID)
+	return err
+}
+
+const upsertSubscription = `-- name: UpsertSubscription :one
+
+INSERT INTO subscriptions (client_id, external_id, customer_email, click_id, link_id, video_id, started_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (client_id, external_id) DO UPDATE
+SET customer_email = COALESCE(NULLIF(EXCLUDED.customer_email, ''), subscriptions.customer_email),
+    click_id = COALESCE(subscriptions.click_id, EXCLUDED.click_id),
+    link_id  = COALESCE(subscriptions.link_id, EXCLUDED.link_id),
+    video_id = COALESCE(subscriptions.video_id, EXCLUDED.video_id)
+RETURNING id
+`
+
+type UpsertSubscriptionParams struct {
+	ClientID      uuid.UUID     `json:"client_id"`
+	ExternalID    string        `json:"external_id"`
+	CustomerEmail string        `json:"customer_email"`
+	ClickID       pgtype.Int8   `json:"click_id"`
+	LinkID        uuid.NullUUID `json:"link_id"`
+	VideoID       uuid.NullUUID `json:"video_id"`
+	StartedAt     time.Time     `json:"started_at"`
+}
+
+// ===== Stripe subscriptions & refunds =====
+func (q *Queries) UpsertSubscription(ctx context.Context, arg UpsertSubscriptionParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertSubscription,
+		arg.ClientID,
+		arg.ExternalID,
+		arg.CustomerEmail,
+		arg.ClickID,
+		arg.LinkID,
+		arg.VideoID,
+		arg.StartedAt,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const upsertVideo = `-- name: UpsertVideo :one
+INSERT INTO videos (client_id, channel_id, youtube_video_id, title, thumbnail_url, published_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (youtube_video_id) DO UPDATE
+SET title = EXCLUDED.title,
+    thumbnail_url = EXCLUDED.thumbnail_url,
+    channel_id = EXCLUDED.channel_id,
+    published_at = COALESCE(EXCLUDED.published_at, videos.published_at)
+RETURNING id
+`
+
+type UpsertVideoParams struct {
+	ClientID       uuid.UUID     `json:"client_id"`
+	ChannelID      uuid.NullUUID `json:"channel_id"`
+	YoutubeVideoID string        `json:"youtube_video_id"`
+	Title          string        `json:"title"`
+	ThumbnailUrl   string        `json:"thumbnail_url"`
+	PublishedAt    *time.Time    `json:"published_at"`
+}
+
+func (q *Queries) UpsertVideo(ctx context.Context, arg UpsertVideoParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertVideo,
+		arg.ClientID,
+		arg.ChannelID,
+		arg.YoutubeVideoID,
+		arg.Title,
+		arg.ThumbnailUrl,
+		arg.PublishedAt,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const upsertVideoStatDaily = `-- name: UpsertVideoStatDaily :exec
+INSERT INTO video_stats_daily (video_id, day, views, watch_minutes, subs_gained)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (video_id, day) DO UPDATE
+SET views = EXCLUDED.views,
+    watch_minutes = EXCLUDED.watch_minutes,
+    subs_gained = EXCLUDED.subs_gained
+`
+
+type UpsertVideoStatDailyParams struct {
+	VideoID      uuid.UUID   `json:"video_id"`
+	Day          pgtype.Date `json:"day"`
+	Views        int64       `json:"views"`
+	WatchMinutes int64       `json:"watch_minutes"`
+	SubsGained   int32       `json:"subs_gained"`
+}
+
+func (q *Queries) UpsertVideoStatDaily(ctx context.Context, arg UpsertVideoStatDailyParams) error {
+	_, err := q.db.Exec(ctx, upsertVideoStatDaily,
+		arg.VideoID,
+		arg.Day,
+		arg.Views,
+		arg.WatchMinutes,
+		arg.SubsGained,
 	)
 	return err
+}
+
+const upsertYoutubeChannel = `-- name: UpsertYoutubeChannel :one
+
+INSERT INTO youtube_channels (client_id, google_channel_id, title, thumbnail_url, refresh_token_enc, status)
+VALUES ($1, $2, $3, $4, $5, 'connected')
+ON CONFLICT (google_channel_id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    title = EXCLUDED.title,
+    thumbnail_url = EXCLUDED.thumbnail_url,
+    refresh_token_enc = EXCLUDED.refresh_token_enc,
+    status = 'connected',
+    connected_at = now()
+RETURNING id, client_id, google_channel_id, title, thumbnail_url, refresh_token_enc, status, connected_at, last_synced_at
+`
+
+type UpsertYoutubeChannelParams struct {
+	ClientID        uuid.UUID `json:"client_id"`
+	GoogleChannelID string    `json:"google_channel_id"`
+	Title           string    `json:"title"`
+	ThumbnailUrl    string    `json:"thumbnail_url"`
+	RefreshTokenEnc []byte    `json:"refresh_token_enc"`
+}
+
+// ===== YouTube OAuth =====
+// One row per Google channel. Re-connecting the same channel (same
+// google_channel_id) updates it in place rather than duplicating; a client
+// can have more than one channel connected (some agencies run several
+// per client), so this is keyed on google_channel_id, not client_id.
+func (q *Queries) UpsertYoutubeChannel(ctx context.Context, arg UpsertYoutubeChannelParams) (YoutubeChannel, error) {
+	row := q.db.QueryRow(ctx, upsertYoutubeChannel,
+		arg.ClientID,
+		arg.GoogleChannelID,
+		arg.Title,
+		arg.ThumbnailUrl,
+		arg.RefreshTokenEnc,
+	)
+	var i YoutubeChannel
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.GoogleChannelID,
+		&i.Title,
+		&i.ThumbnailUrl,
+		&i.RefreshTokenEnc,
+		&i.Status,
+		&i.ConnectedAt,
+		&i.LastSyncedAt,
+	)
+	return i, err
+}
+
+const videoLeaderboard = `-- name: VideoLeaderboard :many
+SELECT
+    v.id, v.title, v.youtube_video_id, v.thumbnail_url,
+    COALESCE(cl.clicks, 0)::bigint AS clicks,
+    COALESCE(cvs.conversions, 0)::bigint AS conversions,
+    COALESCE(cvs.revenue_cents, 0)::bigint AS revenue_cents,
+    COALESCE(co.cost_cents, 0)::bigint AS cost_cents
+FROM videos v
+LEFT JOIN (
+    SELECT k.video_id, COUNT(*) AS clicks
+    FROM clicks k
+    WHERE k.client_id = $1 AND NOT k.is_bot
+      AND k.created_at >= $2 AND k.created_at < $3
+    GROUP BY k.video_id
+) cl ON cl.video_id = v.id
+LEFT JOIN (
+    SELECT cv.video_id,
+           COUNT(*) FILTER (WHERE cv.event_type <> 'refund') AS conversions,
+           SUM(cv.amount_cents) AS revenue_cents
+    FROM conversions cv
+    WHERE cv.client_id = $1
+      AND cv.occurred_at >= $2 AND cv.occurred_at < $3
+    GROUP BY cv.video_id
+) cvs ON cvs.video_id = v.id
+LEFT JOIN (
+    SELECT vc.video_id, SUM(vc.amount_cents) AS cost_cents
+    FROM video_costs vc
+    GROUP BY vc.video_id
+) co ON co.video_id = v.id
+WHERE v.client_id = $1
+ORDER BY revenue_cents DESC, clicks DESC
+LIMIT $4
+`
+
+type VideoLeaderboardParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	FromTs   time.Time `json:"from_ts"`
+	ToTs     time.Time `json:"to_ts"`
+	RowLimit int32     `json:"row_limit"`
+}
+
+type VideoLeaderboardRow struct {
+	ID             uuid.UUID `json:"id"`
+	Title          string    `json:"title"`
+	YoutubeVideoID string    `json:"youtube_video_id"`
+	ThumbnailUrl   string    `json:"thumbnail_url"`
+	Clicks         int64     `json:"clicks"`
+	Conversions    int64     `json:"conversions"`
+	RevenueCents   int64     `json:"revenue_cents"`
+	CostCents      int64     `json:"cost_cents"`
+}
+
+func (q *Queries) VideoLeaderboard(ctx context.Context, arg VideoLeaderboardParams) ([]VideoLeaderboardRow, error) {
+	rows, err := q.db.Query(ctx, videoLeaderboard,
+		arg.ClientID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []VideoLeaderboardRow
+	for rows.Next() {
+		var i VideoLeaderboardRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.YoutubeVideoID,
+			&i.ThumbnailUrl,
+			&i.Clicks,
+			&i.Conversions,
+			&i.RevenueCents,
+			&i.CostCents,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
