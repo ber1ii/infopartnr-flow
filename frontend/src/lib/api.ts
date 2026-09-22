@@ -165,6 +165,12 @@ export interface ChannelAnalytics {
   top_videos: TopVideo[]
 }
 
+export interface DescriptionInjectionPreview {
+  current_description: string
+  new_description: string
+  already_injected: boolean
+}
+
 export class ApiError extends Error {
   status: number
   constructor(message: string, status: number) {

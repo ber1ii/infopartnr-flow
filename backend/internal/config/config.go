@@ -24,6 +24,7 @@ type Config struct {
 	EncryptionKey      string // 64 hex chars (32 bytes) for AES-GCM
 	GoogleClientID     string // from Google Cloud Console OAuth client
 	GoogleClientSecret string
+	Env                string // dev default, or production
 }
 
 func Load() Config {
@@ -44,6 +45,7 @@ func Load() Config {
 		JWTTTL:             time.Duration(atoi(getenv("JWT_TTL_HOURS", "12"))) * time.Hour,
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		Env:                getenv("ENV", "development"),
 	}
 	if c.IPSalt == "dev-only-change-me" {
 		log.Println("WARNING: using default IP_SALT, set IP_SALT in production")
@@ -56,6 +58,9 @@ func Load() Config {
 	}
 	if c.GoogleClientID == "" || c.GoogleClientSecret == "" {
 		log.Println("WARNING: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set, YouTube connect will fail")
+	}
+	if c.Env == "production" && os.Getenv("SKIP_CALENDLY_API") == "true" {
+		log.Fatal("SKIP_CALENDLY_API must not be set when ENV=production -- remove it before deploying")
 	}
 	return c
 }

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Area, AreaChart, CartesianGrid, XAxis } from "recharts"
 import { ChevronDown, ChevronRight, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
-import { api, errMsg, type Video, type VideoAnalytics, type VideoCost, type YoutubeChannel, type YoutubeSyncResponse } from "@/lib/api"
+import { api, errMsg, type DescriptionInjectionPreview, type Video, type VideoAnalytics, type VideoCost, type YoutubeChannel, type YoutubeSyncResponse } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -185,6 +185,77 @@ export default function Videos() {
   )
 }
 
+function DescriptionInjection({ videoBase }: { videoBase: string }) {
+  const [linkUrl, setLinkUrl] = useState("")
+  const [currentDescription, setCurrentDescription] = useState<string | null>(null)
+  const [description, setDescription] = useState<string | null>(null)
+
+  const preview = useMutation({
+    mutationFn: () =>
+      api<DescriptionInjectionPreview>(
+        `${videoBase}/description-injection/preview?link_url=${encodeURIComponent(linkUrl)}`,
+      ),
+    onSuccess: (res) => {
+      setCurrentDescription(res.current_description)
+      setDescription(res.new_description)
+      if (res.already_injected) toast.info("Already has an injected link — previewing the replacement.")
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  })
+
+  const apply = useMutation({
+    mutationFn: () => api<void>(`${videoBase}/description-injection`, { body: { description } }),
+    onSuccess: () => {
+      toast.success("Description updated on YouTube")
+      setCurrentDescription(null)
+      setDescription(null)
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  })
+
+  return (
+    <Card>
+      <CardHeader className="py-3">
+        <CardTitle className="text-sm">Description injection</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex gap-2">
+          <Input
+            placeholder="https://go.yourdomain.com/slug"
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+          />
+          <Button variant="outline" onClick={() => preview.mutate()} disabled={!linkUrl || preview.isPending}>
+            {preview.isPending ? "Fetching…" : "Preview"}
+          </Button>
+        </div>
+
+        {description !== null && (
+          <div className="space-y-3 border-t pt-3">
+            <div>
+              <Label className="text-xs text-muted-foreground">Current description (on YouTube)</Label>
+              <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-2 text-xs">
+                {currentDescription || "(empty)"}
+              </pre>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">New description (editable before applying)</Label>
+              <textarea
+                className="mt-1 h-32 w-full rounded-md border p-2 text-xs"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+            <Button onClick={() => apply.mutate()} disabled={apply.isPending} className="w-full">
+              {apply.isPending ? "Applying…" : "Apply to YouTube"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function VideoExpansion({
   base,
   video,
@@ -268,6 +339,7 @@ function VideoExpansion({
       </Card>
 
       <VideoCosts videoBase={videoBase} onChanged={onCostsChanged} />
+      <DescriptionInjection videoBase={videoBase} />
     </div>
   )
 }
@@ -394,3 +466,4 @@ function VideoCosts({ videoBase, onChanged }: { videoBase: string; onChanged: ()
     </Card>
   )
 }
+

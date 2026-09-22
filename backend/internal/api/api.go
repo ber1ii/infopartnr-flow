@@ -85,6 +85,10 @@ func (a *API) Routes() http.Handler {
 					r.Get("/", a.listVideos)
 					r.Route("/{videoID}", func(r chi.Router) {
 						r.Get("/analytics", a.videoAnalytics)
+						r.Route("/description-injection", func(r chi.Router) {
+							r.Get("/preview", a.previewDescriptionInjection)
+							r.Post("/", a.applyDescriptionInjection)
+						})
 						r.Route("/costs", func(r chi.Router) {
 							r.Get("/", a.listVideoCosts)
 							r.Post("/", a.addVideoCost)
