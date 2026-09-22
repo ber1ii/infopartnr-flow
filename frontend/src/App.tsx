@@ -9,6 +9,7 @@ import Links from "./components/Links"
 import Conversions from "./components/Conversions"
 import Integrations from "./components/Integrations"
 import Videos from "./components/Videos"
+import ChannelAnalytics from "./components/ChannelAnalytics"
 
 function Home() {
   const { user } = useAuth()
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/clients" element={<Clients />} />
             <Route path="/c/:clientId/integrations" element={<Integrations />} />
             <Route path="/c/:clientId/videos" element={<Videos />} />
+            <Route path="/c/:clientId/channel-analytics" element={<ChannelAnalytics />} />
           </Route>
           <Route path="/c/:clientId/overview" element={<Overview />} />
           <Route path="/c/:clientId/links" element={<Links />} />

@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ChannelStatsDaily struct {
+	ChannelID    uuid.UUID   `json:"channel_id"`
+	ClientID     uuid.UUID   `json:"client_id"`
+	Day          pgtype.Date `json:"day"`
+	Views        int64       `json:"views"`
+	WatchMinutes int64       `json:"watch_minutes"`
+	SubsGained   int32       `json:"subs_gained"`
+	SubsLost     int32       `json:"subs_lost"`
+	Likes        int64       `json:"likes"`
+	Comments     int64       `json:"comments"`
+}
+
 type Click struct {
 	ID         int64         `json:"id"`
 	LinkID     uuid.UUID     `json:"link_id"`

@@ -28,8 +28,8 @@ type Config struct {
 
 func Load() Config {
 	c := Config{
-		Port:               getenv("PORT", "8080"),
-		DatabaseURL:        getenv("DATABASE_URL", "postgres://postgres:postgrespassword@localhost:5432/infopartnr-flow"),
+		Port:               getenv("PORT", "8081"),
+		DatabaseURL:        getenv("DATABASE_URL", "postgres://postgres:postgrespassword@localhost:5433/infopartnr-flow"),
 		IPSalt:             getenv("IP_SALT", "dev-only-change-me"),
 		GeoIPPath:          os.Getenv("GEOIP_DB"),
 		TrackJSPath:        getenv("TRACK_JS_PATH", "../frontend/public/track.js"),
@@ -38,7 +38,7 @@ func Load() Config {
 		ClickBatchSize:     atoi(getenv("CLICK_BATCH_SIZE", "500")),
 		ClickFlushInterval: time.Duration(atoi(getenv("CLICK_FLUSH_MS", "1000"))) * time.Millisecond,
 		AppURL:             getenv("APP_URL", "http://localhost:5173"),
-		PublicURL:          getenv("PUBLIC_URL", "http://localhost:8080"),
+		PublicURL:          getenv("PUBLIC_URL", "http://localhost:8081"),
 		EncryptionKey:      getenv("ENCRYPTION_KEY", devEncryptionKey),
 		JWTSecret:          getenv("JWT_SECRET", "dev-only-jwt-secret-change-me"),
 		JWTTTL:             time.Duration(atoi(getenv("JWT_TTL_HOURS", "12"))) * time.Hour,

@@ -3,7 +3,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { defineConfig } from "vite"
 
 export default defineConfig({
-  plugins: [/* your react plugin */, tailwindcss()],
+  plugins: [tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "./src") } },
-  server: { proxy: { "/api": "http://localhost:8080" } },
+  server: { proxy: { "/api": "http://localhost:8081" } },
 })

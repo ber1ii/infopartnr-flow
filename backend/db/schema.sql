@@ -250,3 +250,20 @@ CREATE TABLE report_shares (
     revoked_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- YouTube Analytics API data, one row per channel per day. Channel-level
+-- totals (subscriber deltas, etc.) are fetched via a separate channel-level
+-- Analytics API call per sync -- never derive these by summing video_stats_daily.
+CREATE TABLE channel_stats_daily (
+    channel_id UUID NOT NULL REFERENCES youtube_channels(id) ON DELETE CASCADE,
+    client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,  -- denormalized for fast scoping
+    day DATE NOT NULL,
+    views BIGINT NOT NULL DEFAULT 0,
+    watch_minutes BIGINT NOT NULL DEFAULT 0,
+    subs_gained INTEGER NOT NULL DEFAULT 0,
+    subs_lost INTEGER NOT NULL DEFAULT 0,
+    likes BIGINT NOT NULL DEFAULT 0,
+    comments BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, day)
+);
+CREATE INDEX channel_stats_daily_client_day_idx ON channel_stats_daily (client_id, day);

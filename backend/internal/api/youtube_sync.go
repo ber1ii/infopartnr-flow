@@ -79,6 +79,7 @@ func (a *API) SyncChannel(ctx context.Context, channelID, clientID uuid.UUID, go
 		return fmt.Errorf("uploads: %w", err)
 	}
 	a.syncAnalytics(ctx, access, videoIDs)
+	a.syncChannelAnalytics(ctx, access, channelID, clientID)
 
 	return a.Q.UpdateChannelSyncStatus(ctx, channelID)
 }
@@ -189,6 +190,59 @@ func (a *API) syncAnalytics(ctx context.Context, access string, videoIDs map[str
 	}
 }
 
+// One Analytics API call per channel per sync, separate from the per-video
+// loop in syncAnalytics -- ids=channel==MINE with no `filters` gives
+// channel-level totals (subs gained/lost etc.) that aren't derivable by
+// summing video_stats_daily (deleted/private videos, channel-only metrics).
+func (a *API) syncChannelAnalytics(ctx context.Context, access string, channelID, clientID uuid.UUID) {
+	end := time.Now().UTC().Format("2006-01-02")
+	start := time.Now().UTC().AddDate(0, 0, -syncWindowDays).Format("2006-01-02")
+
+	body, err := a.googleGet(ctx, access, "https://youtubeanalytics.googleapis.com/v2/reports", url.Values{
+		"ids":        {"channel==MINE"},
+		"startDate":  {start},
+		"endDate":    {end},
+		"metrics":    {"views,estimatedMinutesWatched,subscribersGained,subscribersLost,likes,comments"},
+		"dimensions": {"day"},
+		"sort":       {"day"},
+	})
+	if err != nil {
+		log.Printf("youtube sync: channel analytics %s: %v", channelID, err)
+		return
+	}
+	var rep struct {
+		Rows [][]any `json:"rows"`
+	}
+	if err := json.Unmarshal(body, &rep); err != nil {
+		log.Printf("youtube sync: channel analytics parse %s: %v", channelID, err)
+		return
+	}
+	num := func(v any) int64 { f, _ := v.(float64); return int64(f) }
+	for _, row := range rep.Rows {
+		if len(row) < 7 {
+			continue
+		}
+		ds, _ := row[0].(string)
+		day, err := time.Parse("2006-01-02", ds)
+		if err != nil {
+			continue
+		}
+		if err := a.Q.UpsertChannelStatDaily(ctx, db.UpsertChannelStatDailyParams{
+			ChannelID:    channelID,
+			ClientID:     clientID,
+			Day:          pgtype.Date{Time: day, Valid: true},
+			Views:        num(row[1]),
+			WatchMinutes: num(row[2]),
+			SubsGained:   int32(num(row[3])),
+			SubsLost:     int32(num(row[4])),
+			Likes:        num(row[5]),
+			Comments:     num(row[6]),
+		}); err != nil {
+			log.Printf("youtube sync: channel stat upsert %s: %v", channelID, err)
+		}
+	}
+}
+
 // ===== triggers =====
 
 // POST /clients/{clientID}/youtube/channels/{channelID}/sync
@@ -216,26 +270,44 @@ func (a *API) syncYoutubeChannel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// StartYoutubeSync syncs all channels on startup, then every `every`.
-func (a *API) StartYoutubeSync(ctx context.Context, every time.Duration) {
-	go func() {
-		t := time.NewTicker(every)
-		defer t.Stop()
-		for {
-			chs, err := a.Q.ListChannelsToSync(ctx)
-			if err != nil {
-				log.Printf("youtube sync: list: %v", err)
-			}
-			for _, ch := range chs {
-				if err := a.SyncChannel(ctx, ch.ID, ch.ClientID, ch.GoogleChannelID, ch.RefreshTokenEnc); err != nil {
-					log.Printf("youtube sync: channel %s: %v", ch.ID, err)
-				}
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-			}
+type youtubeSyncFailure struct {
+	ChannelID string `json:"channel_id"`
+	Error     string `json:"error"`
+}
+
+type youtubeSyncResponse struct {
+	Synced []string             `json:"synced"`
+	Failed []youtubeSyncFailure `json:"failed"`
+}
+
+// syncYoutubeClient handles POST /clients/{clientID}/youtube/sync -- syncs
+// every connected channel for this client, sequentially, and returns once
+// all of them are done. Per-channel failures don't abort the rest; they're
+// reported back so the frontend can surface which channel needs attention
+// (e.g. a revoked token).
+func (a *API) syncYoutubeClient(w http.ResponseWriter, r *http.Request) {
+	c := clientFrom(r.Context())
+	chs, err := a.Q.ListClientChannelsToSync(r.Context(), c.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if len(chs) == 0 {
+		writeErr(w, http.StatusNotFound, "no connected channels for this client")
+		return
+	}
+
+	resp := youtubeSyncResponse{Synced: []string{}, Failed: []youtubeSyncFailure{}}
+	for _, ch := range chs {
+		if err := a.SyncChannel(r.Context(), ch.ID, ch.ClientID, ch.GoogleChannelID, ch.RefreshTokenEnc); err != nil {
+			log.Printf("youtube sync: client %s channel %s: %v", c.ID, ch.ID, err)
+			resp.Failed = append(resp.Failed, youtubeSyncFailure{
+				ChannelID: ch.ID.String(),
+				Error:     "sync failed, check backend logs",
+			})
+			continue
 		}
-	}()
+		resp.Synced = append(resp.Synced, ch.ID.String())
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

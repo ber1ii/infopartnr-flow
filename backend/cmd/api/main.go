@@ -81,7 +81,8 @@ func main() {
 		http.ServeFile(w, req, cfg.TrackJSPath)
 	})
 	apiH := &api.API{Q: q, Pool: pool, Auth: auth.NewManager(cfg.JWTSecret, cfg.JWTTTL), Cache: cache, AppURL: cfg.AppURL, Box: box, PublicURL: cfg.PublicURL, GoogleClientID: cfg.GoogleClientID, GoogleClientSecret: cfg.GoogleClientSecret}
-	apiH.StartYoutubeSync(ctx, 6*time.Hour)
+	// No periodic sync: quota-heavy at scale, and the user wants manual
+	// control via the refresh button / POST .../youtube/sync instead.
 	r.Mount("/api", apiH.Routes())
 
 	stripeH := &webhooks.Stripe{Q: q, Box: box}

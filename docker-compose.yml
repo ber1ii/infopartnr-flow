@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: postgrespassword
       POSTGRES_DB: infopartnr-flow
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Applied only on first init of an empty volume (dev convenience).

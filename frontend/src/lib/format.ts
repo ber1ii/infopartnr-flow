@@ -4,7 +4,7 @@ export const money = (cents: number, currency = "USD") =>
 export const num = (n: number) => new Intl.NumberFormat().format(n)
 
 // Redirects are served by the Go backend. In production this is your short domain.
-const SHORT_BASE: string = import.meta.env.VITE_SHORT_URL_BASE ?? "http://localhost:8080"
+const SHORT_BASE: string = import.meta.env.VITE_SHORT_URL_BASE ?? "http://localhost:8081"
 export const shortUrl = (slug: string) => `${SHORT_BASE}/${slug}`
 
 export const shortDate = (iso: string) =>

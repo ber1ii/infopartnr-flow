@@ -125,3 +125,61 @@ func (a *API) deleteVideoCost(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+type videoStatPoint struct {
+	Date         string `json:"date"`
+	Views        int64  `json:"views"`
+	WatchMinutes int64  `json:"watch_minutes"`
+	SubsGained   int64  `json:"subs_gained"`
+}
+
+type videoAnalyticsResp struct {
+	Daily        []videoStatPoint `json:"daily"`
+	Clicks       int64            `json:"clicks"`
+	Conversions  int64            `json:"conversions"`
+	RevenueCents int64            `json:"revenue_cents"`
+}
+
+// videoAnalytics backs the per-video expansion on the Videos page: a
+// views-over-time series (zero-filled, same pattern as statsClicksByDay)
+// plus this app's own funnel numbers for the video in the same window.
+// Cost isn't included -- the caller already has the lifetime total from
+// listVideos and can compute ROI against that.
+func (a *API) videoAnalytics(w http.ResponseWriter, r *http.Request) {
+	v, ok := a.videoCtx(r)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	from, to, days := parseRange(r)
+
+	statRows, err := a.Q.ListVideoStatsDaily(r.Context(), db.ListVideoStatsDailyParams{VideoID: v.ID, FromTs: from, ToTs: to})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	byDay := make(map[string]db.ListVideoStatsDailyRow, len(statRows))
+	for _, row := range statRows {
+		byDay[row.Day.Time.UTC().Format("2006-01-02")] = row
+	}
+	daily := make([]videoStatPoint, 0, days) // zero-fill so the chart has no gaps
+	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+		k := d.Format("2006-01-02")
+		row := byDay[k]
+		daily = append(daily, videoStatPoint{
+			Date: k, Views: row.Views, WatchMinutes: row.WatchMinutes, SubsGained: int64(row.SubsGained),
+		})
+	}
+
+	ov, err := a.Q.GetVideoOverview(r.Context(), db.GetVideoOverviewParams{
+		VideoID: uuid.NullUUID{UUID: v.ID, Valid: true}, FromTs: from, ToTs: to,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, videoAnalyticsResp{
+		Daily: daily, Clicks: ov.Clicks, Conversions: ov.Conversions, RevenueCents: ov.RevenueCents,
+	})
+}

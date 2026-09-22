@@ -107,6 +107,13 @@ export interface VideoCost {
   created_at: string
 }
 
+export interface VideoAnalytics {
+  daily: { date: string; views: number; watch_minutes: number; subs_gained: number }[]
+  clicks: number
+  conversions: number
+  revenue_cents: number
+}
+
 export interface YoutubeChannel {
   id: string
   client_id: string
@@ -116,6 +123,46 @@ export interface YoutubeChannel {
   status: "connected" | "revoked"
   connected_at: string
   last_synced_at: string | null
+}
+
+export interface YoutubeSyncResponse {
+  synced: string[]
+  failed: { channel_id: string; error: string }[]
+}
+
+export interface ChannelAnalyticsOverview {
+  views: number
+  watch_minutes: number
+  subs_gained: number
+  subs_lost: number
+  subs_net: number
+  likes: number
+  comments: number
+}
+
+export interface ChannelDayPoint {
+  date: string
+  views: number
+  watch_minutes: number
+  subs_gained: number
+  subs_lost: number
+}
+
+export interface TopVideo {
+  id: string
+  title: string
+  youtube_video_id: string
+  thumbnail_url: string
+  clicks: number
+  conversions: number
+  revenue_cents: number
+  cost_cents: number
+}
+
+export interface ChannelAnalytics {
+  overview: ChannelAnalyticsOverview
+  daily: ChannelDayPoint[]
+  top_videos: TopVideo[]
 }
 
 export class ApiError extends Error {

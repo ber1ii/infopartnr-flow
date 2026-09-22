@@ -368,10 +368,10 @@ DELETE FROM youtube_channels WHERE id = $1 AND client_id = $2;
 
 -- ===== YouTube Sync =====
 
--- name: ListChannelsToSync :many
+-- name: ListClientChannelsToSync :many
 SELECT id, client_id, google_channel_id, refresh_token_enc
 FROM youtube_channels
-WHERE status = 'connected' AND refresh_token_enc IS NOT NULL;
+WHERE client_id = $1 AND status = 'connected' AND refresh_token_enc IS NOT NULL;
 
 -- name: GetChannelForSync :one
 SELECT id, client_id, google_channel_id, refresh_token_enc
@@ -401,3 +401,68 @@ UPDATE youtube_channels SET last_synced_at = now() WHERE id = $1;
 
 -- name: MarkChannelRevoked :exec
 UPDATE youtube_channels SET status = 'revoked' WHERE id = $1;
+
+-- ===== Video analytics (per-video expansion on the Videos page) =====
+
+-- name: ListVideoStatsDaily :many
+SELECT day, views, watch_minutes, subs_gained
+FROM video_stats_daily
+WHERE video_id = sqlc.arg(video_id)
+  AND day::timestamptz >= sqlc.arg(from_ts)::timestamptz
+  AND day::timestamptz < sqlc.arg(to_ts)::timestamptz
+ORDER BY day;
+
+-- Clicks/conversions/revenue for one video in a window. Cost is deliberately
+-- left out here -- it's a lifetime total already returned by
+-- ListVideosWithCostsByClient, no need to compute it twice.
+-- name: GetVideoOverview :one
+SELECT
+    (SELECT COUNT(*) FROM clicks k
+      WHERE k.video_id = sqlc.arg(video_id) AND NOT k.is_bot
+        AND k.created_at >= sqlc.arg(from_ts) AND k.created_at < sqlc.arg(to_ts))::bigint AS clicks,
+    (SELECT COUNT(*) FROM conversions cv
+      WHERE cv.video_id = sqlc.arg(video_id) AND cv.event_type <> 'refund'
+        AND cv.occurred_at >= sqlc.arg(from_ts) AND cv.occurred_at < sqlc.arg(to_ts))::bigint AS conversions,
+    (SELECT COALESCE(SUM(cv.amount_cents), 0) FROM conversions cv
+      WHERE cv.video_id = sqlc.arg(video_id)
+        AND cv.occurred_at >= sqlc.arg(from_ts) AND cv.occurred_at < sqlc.arg(to_ts))::bigint AS revenue_cents;
+
+-- ===== Channel analytics =====
+
+-- name: UpsertChannelStatDaily :exec
+INSERT INTO channel_stats_daily (channel_id, client_id, day, views, watch_minutes, subs_gained, subs_lost, likes, comments)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (channel_id, day) DO UPDATE
+SET views = EXCLUDED.views,
+    watch_minutes = EXCLUDED.watch_minutes,
+    subs_gained = EXCLUDED.subs_gained,
+    subs_lost = EXCLUDED.subs_lost,
+    likes = EXCLUDED.likes,
+    comments = EXCLUDED.comments;
+
+-- Summed across all of this client's channels, zero-filled by the handler.
+-- name: ListChannelStatsDailyByClient :many
+SELECT day,
+       SUM(views)::bigint AS views,
+       SUM(watch_minutes)::bigint AS watch_minutes,
+       SUM(subs_gained)::bigint AS subs_gained,
+       SUM(subs_lost)::bigint AS subs_lost
+FROM channel_stats_daily
+WHERE client_id = sqlc.arg(client_id)
+  AND day::timestamptz >= sqlc.arg(from_ts)::timestamptz
+  AND day::timestamptz < sqlc.arg(to_ts)::timestamptz
+GROUP BY day
+ORDER BY day;
+
+-- name: GetChannelAnalyticsOverview :one
+SELECT
+    COALESCE(SUM(views), 0)::bigint AS views,
+    COALESCE(SUM(watch_minutes), 0)::bigint AS watch_minutes,
+    COALESCE(SUM(subs_gained), 0)::bigint AS subs_gained,
+    COALESCE(SUM(subs_lost), 0)::bigint AS subs_lost,
+    COALESCE(SUM(likes), 0)::bigint AS likes,
+    COALESCE(SUM(comments), 0)::bigint AS comments
+FROM channel_stats_daily
+WHERE client_id = sqlc.arg(client_id)
+  AND day::timestamptz >= sqlc.arg(from_ts)::timestamptz
+  AND day::timestamptz < sqlc.arg(to_ts)::timestamptz;

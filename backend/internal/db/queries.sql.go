@@ -513,6 +513,49 @@ func (q *Queries) FindConversionByPayment(ctx context.Context, arg FindConversio
 	return i, err
 }
 
+const getChannelAnalyticsOverview = `-- name: GetChannelAnalyticsOverview :one
+SELECT
+    COALESCE(SUM(views), 0)::bigint AS views,
+    COALESCE(SUM(watch_minutes), 0)::bigint AS watch_minutes,
+    COALESCE(SUM(subs_gained), 0)::bigint AS subs_gained,
+    COALESCE(SUM(subs_lost), 0)::bigint AS subs_lost,
+    COALESCE(SUM(likes), 0)::bigint AS likes,
+    COALESCE(SUM(comments), 0)::bigint AS comments
+FROM channel_stats_daily
+WHERE client_id = $1
+  AND day::timestamptz >= $2::timestamptz
+  AND day::timestamptz < $3::timestamptz
+`
+
+type GetChannelAnalyticsOverviewParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	FromTs   time.Time `json:"from_ts"`
+	ToTs     time.Time `json:"to_ts"`
+}
+
+type GetChannelAnalyticsOverviewRow struct {
+	Views        int64 `json:"views"`
+	WatchMinutes int64 `json:"watch_minutes"`
+	SubsGained   int64 `json:"subs_gained"`
+	SubsLost     int64 `json:"subs_lost"`
+	Likes        int64 `json:"likes"`
+	Comments     int64 `json:"comments"`
+}
+
+func (q *Queries) GetChannelAnalyticsOverview(ctx context.Context, arg GetChannelAnalyticsOverviewParams) (GetChannelAnalyticsOverviewRow, error) {
+	row := q.db.QueryRow(ctx, getChannelAnalyticsOverview, arg.ClientID, arg.FromTs, arg.ToTs)
+	var i GetChannelAnalyticsOverviewRow
+	err := row.Scan(
+		&i.Views,
+		&i.WatchMinutes,
+		&i.SubsGained,
+		&i.SubsLost,
+		&i.Likes,
+		&i.Comments,
+	)
+	return i, err
+}
+
 const getChannelForSync = `-- name: GetChannelForSync :one
 SELECT id, client_id, google_channel_id, refresh_token_enc
 FROM youtube_channels
@@ -909,6 +952,41 @@ func (q *Queries) GetVideo(ctx context.Context, arg GetVideoParams) (Video, erro
 	return i, err
 }
 
+const getVideoOverview = `-- name: GetVideoOverview :one
+SELECT
+    (SELECT COUNT(*) FROM clicks k
+      WHERE k.video_id = $1 AND NOT k.is_bot
+        AND k.created_at >= $2 AND k.created_at < $3)::bigint AS clicks,
+    (SELECT COUNT(*) FROM conversions cv
+      WHERE cv.video_id = $1 AND cv.event_type <> 'refund'
+        AND cv.occurred_at >= $2 AND cv.occurred_at < $3)::bigint AS conversions,
+    (SELECT COALESCE(SUM(cv.amount_cents), 0) FROM conversions cv
+      WHERE cv.video_id = $1
+        AND cv.occurred_at >= $2 AND cv.occurred_at < $3)::bigint AS revenue_cents
+`
+
+type GetVideoOverviewParams struct {
+	VideoID uuid.NullUUID `json:"video_id"`
+	FromTs  time.Time     `json:"from_ts"`
+	ToTs    time.Time     `json:"to_ts"`
+}
+
+type GetVideoOverviewRow struct {
+	Clicks       int64 `json:"clicks"`
+	Conversions  int64 `json:"conversions"`
+	RevenueCents int64 `json:"revenue_cents"`
+}
+
+// Clicks/conversions/revenue for one video in a window. Cost is deliberately
+// left out here -- it's a lifetime total already returned by
+// ListVideosWithCostsByClient, no need to compute it twice.
+func (q *Queries) GetVideoOverview(ctx context.Context, arg GetVideoOverviewParams) (GetVideoOverviewRow, error) {
+	row := q.db.QueryRow(ctx, getVideoOverview, arg.VideoID, arg.FromTs, arg.ToTs)
+	var i GetVideoOverviewRow
+	err := row.Scan(&i.Clicks, &i.Conversions, &i.RevenueCents)
+	return i, err
+}
+
 type InsertClicksParams struct {
 	LinkID     uuid.UUID     `json:"link_id"`
 	VariantID  uuid.NullUUID `json:"variant_id"`
@@ -1011,6 +1089,61 @@ func (q *Queries) ListActiveVariants(ctx context.Context, linkID uuid.UUID) ([]L
 	return items, nil
 }
 
+const listChannelStatsDailyByClient = `-- name: ListChannelStatsDailyByClient :many
+SELECT day,
+       SUM(views)::bigint AS views,
+       SUM(watch_minutes)::bigint AS watch_minutes,
+       SUM(subs_gained)::bigint AS subs_gained,
+       SUM(subs_lost)::bigint AS subs_lost
+FROM channel_stats_daily
+WHERE client_id = $1
+  AND day::timestamptz >= $2::timestamptz
+  AND day::timestamptz < $3::timestamptz
+GROUP BY day
+ORDER BY day
+`
+
+type ListChannelStatsDailyByClientParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	FromTs   time.Time `json:"from_ts"`
+	ToTs     time.Time `json:"to_ts"`
+}
+
+type ListChannelStatsDailyByClientRow struct {
+	Day          pgtype.Date `json:"day"`
+	Views        int64       `json:"views"`
+	WatchMinutes int64       `json:"watch_minutes"`
+	SubsGained   int64       `json:"subs_gained"`
+	SubsLost     int64       `json:"subs_lost"`
+}
+
+// Summed across all of this client's channels, zero-filled by the handler.
+func (q *Queries) ListChannelStatsDailyByClient(ctx context.Context, arg ListChannelStatsDailyByClientParams) ([]ListChannelStatsDailyByClientRow, error) {
+	rows, err := q.db.Query(ctx, listChannelStatsDailyByClient, arg.ClientID, arg.FromTs, arg.ToTs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChannelStatsDailyByClientRow
+	for rows.Next() {
+		var i ListChannelStatsDailyByClientRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.Views,
+			&i.WatchMinutes,
+			&i.SubsGained,
+			&i.SubsLost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelsByClient = `-- name: ListChannelsByClient :many
 SELECT id, client_id, google_channel_id, title, thumbnail_url, status, connected_at, last_synced_at
 FROM youtube_channels
@@ -1057,14 +1190,14 @@ func (q *Queries) ListChannelsByClient(ctx context.Context, clientID uuid.UUID) 
 	return items, nil
 }
 
-const listChannelsToSync = `-- name: ListChannelsToSync :many
+const listClientChannelsToSync = `-- name: ListClientChannelsToSync :many
 
 SELECT id, client_id, google_channel_id, refresh_token_enc
 FROM youtube_channels
-WHERE status = 'connected' AND refresh_token_enc IS NOT NULL
+WHERE client_id = $1 AND status = 'connected' AND refresh_token_enc IS NOT NULL
 `
 
-type ListChannelsToSyncRow struct {
+type ListClientChannelsToSyncRow struct {
 	ID              uuid.UUID `json:"id"`
 	ClientID        uuid.UUID `json:"client_id"`
 	GoogleChannelID string    `json:"google_channel_id"`
@@ -1072,15 +1205,15 @@ type ListChannelsToSyncRow struct {
 }
 
 // ===== YouTube Sync =====
-func (q *Queries) ListChannelsToSync(ctx context.Context) ([]ListChannelsToSyncRow, error) {
-	rows, err := q.db.Query(ctx, listChannelsToSync)
+func (q *Queries) ListClientChannelsToSync(ctx context.Context, clientID uuid.UUID) ([]ListClientChannelsToSyncRow, error) {
+	rows, err := q.db.Query(ctx, listClientChannelsToSync, clientID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListChannelsToSyncRow
+	var items []ListClientChannelsToSyncRow
 	for rows.Next() {
-		var i ListChannelsToSyncRow
+		var i ListClientChannelsToSyncRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ClientID,
@@ -1387,6 +1520,55 @@ func (q *Queries) ListVideoCostsByVideo(ctx context.Context, videoID uuid.UUID) 
 	return items, nil
 }
 
+const listVideoStatsDaily = `-- name: ListVideoStatsDaily :many
+
+SELECT day, views, watch_minutes, subs_gained
+FROM video_stats_daily
+WHERE video_id = $1
+  AND day::timestamptz >= $2::timestamptz
+  AND day::timestamptz < $3::timestamptz
+ORDER BY day
+`
+
+type ListVideoStatsDailyParams struct {
+	VideoID uuid.UUID `json:"video_id"`
+	FromTs  time.Time `json:"from_ts"`
+	ToTs    time.Time `json:"to_ts"`
+}
+
+type ListVideoStatsDailyRow struct {
+	Day          pgtype.Date `json:"day"`
+	Views        int64       `json:"views"`
+	WatchMinutes int64       `json:"watch_minutes"`
+	SubsGained   int32       `json:"subs_gained"`
+}
+
+// ===== Video analytics (per-video expansion on the Videos page) =====
+func (q *Queries) ListVideoStatsDaily(ctx context.Context, arg ListVideoStatsDailyParams) ([]ListVideoStatsDailyRow, error) {
+	rows, err := q.db.Query(ctx, listVideoStatsDaily, arg.VideoID, arg.FromTs, arg.ToTs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVideoStatsDailyRow
+	for rows.Next() {
+		var i ListVideoStatsDailyRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.Views,
+			&i.WatchMinutes,
+			&i.SubsGained,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVideosByClient = `-- name: ListVideosByClient :many
 
 SELECT id, client_id, channel_id, youtube_video_id, title, thumbnail_url, published_at, created_at FROM videos WHERE client_id = $1 ORDER BY published_at DESC NULLS LAST
@@ -1597,6 +1779,47 @@ func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Trackin
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertChannelStatDaily = `-- name: UpsertChannelStatDaily :exec
+
+INSERT INTO channel_stats_daily (channel_id, client_id, day, views, watch_minutes, subs_gained, subs_lost, likes, comments)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (channel_id, day) DO UPDATE
+SET views = EXCLUDED.views,
+    watch_minutes = EXCLUDED.watch_minutes,
+    subs_gained = EXCLUDED.subs_gained,
+    subs_lost = EXCLUDED.subs_lost,
+    likes = EXCLUDED.likes,
+    comments = EXCLUDED.comments
+`
+
+type UpsertChannelStatDailyParams struct {
+	ChannelID    uuid.UUID   `json:"channel_id"`
+	ClientID     uuid.UUID   `json:"client_id"`
+	Day          pgtype.Date `json:"day"`
+	Views        int64       `json:"views"`
+	WatchMinutes int64       `json:"watch_minutes"`
+	SubsGained   int32       `json:"subs_gained"`
+	SubsLost     int32       `json:"subs_lost"`
+	Likes        int64       `json:"likes"`
+	Comments     int64       `json:"comments"`
+}
+
+// ===== Channel analytics =====
+func (q *Queries) UpsertChannelStatDaily(ctx context.Context, arg UpsertChannelStatDailyParams) error {
+	_, err := q.db.Exec(ctx, upsertChannelStatDaily,
+		arg.ChannelID,
+		arg.ClientID,
+		arg.Day,
+		arg.Views,
+		arg.WatchMinutes,
+		arg.SubsGained,
+		arg.SubsLost,
+		arg.Likes,
+		arg.Comments,
+	)
+	return err
 }
 
 const upsertIdentity = `-- name: UpsertIdentity :exec

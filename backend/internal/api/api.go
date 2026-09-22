@@ -83,16 +83,21 @@ func (a *API) Routes() http.Handler {
 				r.Route("/videos", func(r chi.Router) {
 					r.Use(auth.RequireStaff)
 					r.Get("/", a.listVideos)
-					r.Route("/{videoID}/costs", func(r chi.Router) {
-						r.Get("/", a.listVideoCosts)
-						r.Post("/", a.addVideoCost)
-						r.Delete("/{costID}", a.deleteVideoCost)
+					r.Route("/{videoID}", func(r chi.Router) {
+						r.Get("/analytics", a.videoAnalytics)
+						r.Route("/costs", func(r chi.Router) {
+							r.Get("/", a.listVideoCosts)
+							r.Post("/", a.addVideoCost)
+							r.Delete("/{costID}", a.deleteVideoCost)
+						})
 					})
 				})
 
 				r.Route("/youtube", func(r chi.Router) {
 					r.Get("/channels", a.listYoutubeChannels)
+					r.Get("/analytics", a.youtubeAnalytics)
 					r.With(auth.RequireStaff).Post("/connect", a.connectYoutube)
+					r.With(auth.RequireStaff).Post("/sync", a.syncYoutubeClient)
 					r.With(auth.RequireStaff).Post("/channels/{channelID}/sync", a.syncYoutubeChannel)
 					r.With(auth.RequireStaff).Delete("/channels/{channelID}", a.disconnectYoutube)
 				})
