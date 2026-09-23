@@ -23,6 +23,7 @@ import (
 	"infopartnr-flow/backend/internal/config"
 	"infopartnr-flow/backend/internal/crypto"
 	"infopartnr-flow/backend/internal/db"
+	"infopartnr-flow/backend/internal/notify"
 	"infopartnr-flow/backend/internal/redirect"
 	"infopartnr-flow/backend/internal/webhooks"
 )
@@ -85,7 +86,8 @@ func main() {
 	// control via the refresh button / POST .../youtube/sync instead.
 	r.Mount("/api", apiH.Routes())
 
-	stripeH := &webhooks.Stripe{Q: q, Box: box}
+	slackNotify := &notify.Slack{Q: q}
+	stripeH := &webhooks.Stripe{Q: q, Box: box, Notify: slackNotify}
 	r.Post("/webhooks/stripe/{integrationID}", stripeH.Serve)
 	typeformH := &webhooks.Typeform{Q: q, Box: box}
 	r.Post("/webhooks/typeform/{integrationID}", typeformH.Serve)

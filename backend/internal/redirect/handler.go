@@ -47,7 +47,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 
 	target := link.TargetURL
 	var variantID uuid.NullUUID
-	if v := pickVariant(link.Variants); v != nil {
+	if v := h.chooseVariant(w, r, link); v != nil {
 		target = v.TargetURL
 		variantID = uuid.NullUUID{UUID: v.ID, Valid: true}
 	}
@@ -85,6 +85,29 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+// Sticky: a per-link cookie on the short-link host remembers the assigned variant.
+func (h *Handler) chooseVariant(w http.ResponseWriter, r *http.Request, link *Link) *Variant {
+	vs := link.Variants
+	if len(vs) < 2 {
+		return pickVariant(vs)
+	}
+	name := "flv_" + link.ID.String()[:8]
+	if c, err := r.Cookie(name); err == nil {
+		for i := range vs {
+			if vs[i].ID.String() == c.Value {
+				return &vs[i]
+			}
+		}
+	}
+	v := pickVariant(vs)
+	http.SetCookie(w, &http.Cookie{
+		Name: name, Value: v.ID.String(), Path: "/", MaxAge: 30 * 24 * 3600,
+		SameSite: http.SameSiteLaxMode, HttpOnly: true,
+		Secure: r.TLS != nil || (h.TrustProxy && r.Header.Get("X-Forwarded-Proto") == "https"),
+	})
+	return v
 }
 
 func (h *Handler) load(r *http.Request, slug string) (*Link, error) {

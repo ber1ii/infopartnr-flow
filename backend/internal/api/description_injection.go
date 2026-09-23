@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	injectMarkerStart = "<!-- flow:start -->"
-	injectMarkerEnd   = "<!-- flow:end -->"
+	injectMarkerStart = "── Related link ──"
+	injectMarkerEnd   = "── 			 ──"
 )
 
 // injectLinkBlock replaces an existing flow:start/flow:end block if present,

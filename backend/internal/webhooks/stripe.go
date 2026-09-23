@@ -22,13 +22,15 @@ import (
 	"infopartnr-flow/backend/internal/attribution"
 	"infopartnr-flow/backend/internal/crypto"
 	"infopartnr-flow/backend/internal/db"
+	"infopartnr-flow/backend/internal/notify"
 )
 
 const sigTolerance = 5 * time.Minute
 
 type Stripe struct {
-	Q   *db.Queries
-	Box *crypto.Box
+	Q      *db.Queries
+	Box    *crypto.Box
+	Notify *notify.Slack
 }
 
 type event struct {
@@ -216,7 +218,7 @@ func (h *Stripe) checkout(ctx context.Context, clientID uuid.UUID, obj json.RawM
 		subID = uuid.NullUUID{UUID: id, Valid: true}
 	}
 
-	return h.insert(ctx, db.InsertConversionParams{
+	err = h.insert(ctx, db.InsertConversionParams{
 		ClientID:          clientID,
 		ClickID:           att.ClickID,
 		LinkID:            att.LinkID,
@@ -233,6 +235,16 @@ func (h *Stripe) checkout(ctx context.Context, clientID uuid.UUID, obj json.RawM
 		Raw:               []byte(obj),
 		OccurredAt:        occurred,
 	})
+	if err == nil && h.Notify != nil {
+		go h.Notify.Fire(context.Background(), notify.ConversionEvent{
+			ClientID:    clientID,
+			EventType:   eventType,
+			AmountCents: s.AmountTotal,
+			Currency:    s.Currency,
+			Email:       strings.ToLower(email),
+		})
+	}
+	return err
 }
 
 // ---- invoice.payment_succeeded (renewals) ----
@@ -311,7 +323,17 @@ func (h *Stripe) invoice(ctx context.Context, clientID uuid.UUID, obj json.RawMe
 		}
 		p.ClickID, p.LinkID, p.VideoID, p.TrakyoID, p.AttributionMethod = att.ClickID, att.LinkID, att.VideoID, att.TrakyoID, att.Method
 	}
-	return h.insert(ctx, p)
+	err = h.insert(ctx, p)
+	if err == nil && h.Notify != nil {
+		go h.Notify.Fire(context.Background(), notify.ConversionEvent{
+			ClientID:    clientID,
+			EventType:   p.EventType,
+			AmountCents: p.AmountCents,
+			Currency:    p.Currency,
+			Email:       p.Email,
+		})
+	}
+	return err
 }
 
 // ---- refund.created ----

@@ -135,6 +135,53 @@ INSERT INTO link_variants (link_id, target_url, weight)
 VALUES ($1, $2, $3)
 RETURNING *;
 
+-- ===== A/B variants =====
+
+-- name: GetLinkByID :one
+SELECT * FROM tracking_links WHERE id = $1 AND client_id = $2;
+
+-- name: CountLinkVariants :one
+SELECT COUNT(*)::bigint FROM link_variants WHERE link_id = $1;
+
+-- Per-variant clicks (bots excluded) + conversions/revenue via the click each
+-- conversion was attributed to.
+-- name: ListVariantsWithStats :many
+SELECT
+    lv.id, lv.link_id, lv.target_url, lv.weight, lv.is_active, lv.created_at,
+    COALESCE(kc.clicks, 0)::bigint AS clicks,
+    COALESCE(cvs.conversions, 0)::bigint AS conversions,
+    COALESCE(cvs.revenue_cents, 0)::bigint AS revenue_cents
+FROM link_variants lv
+LEFT JOIN (
+    SELECT k.variant_id, COUNT(*) AS clicks
+    FROM clicks k
+    WHERE k.link_id = sqlc.arg(link_id) AND k.variant_id IS NOT NULL AND NOT k.is_bot
+    GROUP BY k.variant_id
+) kc ON kc.variant_id = lv.id
+LEFT JOIN (
+    SELECT k.variant_id,
+           COUNT(*) FILTER (WHERE cv.event_type <> 'refund') AS conversions,
+           SUM(cv.amount_cents) AS revenue_cents
+    FROM conversions cv
+    JOIN clicks k ON k.id = cv.click_id
+    WHERE k.link_id = sqlc.arg(link_id) AND k.variant_id IS NOT NULL
+    GROUP BY k.variant_id
+) cvs ON cvs.variant_id = lv.id
+WHERE lv.link_id = sqlc.arg(link_id)
+ORDER BY lv.created_at;
+
+-- Target URL is intentionally immutable: editing it mid-test would mix data.
+-- Caller must verify link ownership (GetLinkByID) first.
+-- name: UpdateLinkVariant :one
+UPDATE link_variants
+SET weight    = COALESCE(sqlc.narg('weight'), weight),
+    is_active = COALESCE(sqlc.narg('is_active'), is_active)
+WHERE id = sqlc.arg('id') AND link_id = sqlc.arg('link_id')
+RETURNING *;
+
+-- name: DeleteLinkVariant :execrows
+DELETE FROM link_variants WHERE id = $1 AND link_id = $2;
+
 -- ===== Conversions =====
 
 -- Returns no row (pgx.ErrNoRows) if the event was already ingested -> idempotent.
@@ -466,3 +513,24 @@ FROM channel_stats_daily
 WHERE client_id = sqlc.arg(client_id)
   AND day::timestamptz >= sqlc.arg(from_ts)::timestamptz
   AND day::timestamptz < sqlc.arg(to_ts)::timestamptz;
+
+-- name: ListActiveSlackChannels :many
+SELECT * FROM notification_channels
+WHERE kind = 'slack' AND is_active = true
+  AND (client_id IS NULL OR client_id = $1);
+
+-- name: ListNotificationChannelsByWorkspace :many
+SELECT * FROM notification_channels WHERE workspace_id = $1 ORDER BY created_at DESC;
+
+-- name: CreateNotificationChannel :one
+INSERT INTO notification_channels (workspace_id, client_id, kind, webhook_url, min_amount_cents, events)
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING *;
+
+-- name: UpdateNotificationChannel :one
+UPDATE notification_channels
+SET webhook_url = $3, min_amount_cents = $4, events = $5, is_active = $6
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+-- name: DeleteNotificationChannel :execrows
+DELETE FROM notification_channels WHERE id = $1 AND workspace_id = $2;

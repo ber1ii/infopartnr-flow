@@ -130,6 +130,17 @@ func (q *Queries) ClicksByDay(ctx context.Context, arg ClicksByDayParams) ([]Cli
 	return items, nil
 }
 
+const countLinkVariants = `-- name: CountLinkVariants :one
+SELECT COUNT(*)::bigint FROM link_variants WHERE link_id = $1
+`
+
+func (q *Queries) CountLinkVariants(ctx context.Context, linkID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countLinkVariants, linkID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*)::bigint FROM users
 `
@@ -326,6 +337,44 @@ func (q *Queries) CreateMembership(ctx context.Context, arg CreateMembershipPara
 	return i, err
 }
 
+const createNotificationChannel = `-- name: CreateNotificationChannel :one
+INSERT INTO notification_channels (workspace_id, client_id, kind, webhook_url, min_amount_cents, events)
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, workspace_id, client_id, kind, webhook_url, min_amount_cents, events, is_active, created_at
+`
+
+type CreateNotificationChannelParams struct {
+	WorkspaceID    uuid.UUID     `json:"workspace_id"`
+	ClientID       uuid.NullUUID `json:"client_id"`
+	Kind           string        `json:"kind"`
+	WebhookUrl     string        `json:"webhook_url"`
+	MinAmountCents int64         `json:"min_amount_cents"`
+	Events         []string      `json:"events"`
+}
+
+func (q *Queries) CreateNotificationChannel(ctx context.Context, arg CreateNotificationChannelParams) (NotificationChannel, error) {
+	row := q.db.QueryRow(ctx, createNotificationChannel,
+		arg.WorkspaceID,
+		arg.ClientID,
+		arg.Kind,
+		arg.WebhookUrl,
+		arg.MinAmountCents,
+		arg.Events,
+	)
+	var i NotificationChannel
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ClientID,
+		&i.Kind,
+		&i.WebhookUrl,
+		&i.MinAmountCents,
+		&i.Events,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 
 INSERT INTO users (email, password_hash, name)
@@ -395,6 +444,40 @@ func (q *Queries) DeleteLink(ctx context.Context, arg DeleteLinkParams) (string,
 	var slug string
 	err := row.Scan(&slug)
 	return slug, err
+}
+
+const deleteLinkVariant = `-- name: DeleteLinkVariant :execrows
+DELETE FROM link_variants WHERE id = $1 AND link_id = $2
+`
+
+type DeleteLinkVariantParams struct {
+	ID     uuid.UUID `json:"id"`
+	LinkID uuid.UUID `json:"link_id"`
+}
+
+func (q *Queries) DeleteLinkVariant(ctx context.Context, arg DeleteLinkVariantParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLinkVariant, arg.ID, arg.LinkID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteNotificationChannel = `-- name: DeleteNotificationChannel :execrows
+DELETE FROM notification_channels WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteNotificationChannelParams struct {
+	ID          uuid.UUID `json:"id"`
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteNotificationChannel, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteVideoCost = `-- name: DeleteVideoCost :one
@@ -829,6 +912,36 @@ func (q *Queries) GetInvitationByTokenHash(ctx context.Context, tokenHash string
 	return i, err
 }
 
+const getLinkByID = `-- name: GetLinkByID :one
+
+SELECT id, client_id, video_id, domain_id, slug, name, target_url, is_active, expires_at, created_at, updated_at FROM tracking_links WHERE id = $1 AND client_id = $2
+`
+
+type GetLinkByIDParams struct {
+	ID       uuid.UUID `json:"id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+// ===== A/B variants =====
+func (q *Queries) GetLinkByID(ctx context.Context, arg GetLinkByIDParams) (TrackingLink, error) {
+	row := q.db.QueryRow(ctx, getLinkByID, arg.ID, arg.ClientID)
+	var i TrackingLink
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.VideoID,
+		&i.DomainID,
+		&i.Slug,
+		&i.Name,
+		&i.TargetUrl,
+		&i.IsActive,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getLinkForRedirect = `-- name: GetLinkForRedirect :one
 
 SELECT id, client_id, video_id, target_url, is_active, expires_at
@@ -1054,6 +1167,42 @@ func (q *Queries) InsertConversion(ctx context.Context, arg InsertConversionPara
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listActiveSlackChannels = `-- name: ListActiveSlackChannels :many
+SELECT id, workspace_id, client_id, kind, webhook_url, min_amount_cents, events, is_active, created_at FROM notification_channels
+WHERE kind = 'slack' AND is_active = true
+  AND (client_id IS NULL OR client_id = $1)
+`
+
+func (q *Queries) ListActiveSlackChannels(ctx context.Context, clientID uuid.NullUUID) ([]NotificationChannel, error) {
+	rows, err := q.db.Query(ctx, listActiveSlackChannels, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NotificationChannel
+	for rows.Next() {
+		var i NotificationChannel
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ClientID,
+			&i.Kind,
+			&i.WebhookUrl,
+			&i.MinAmountCents,
+			&i.Events,
+			&i.IsActive,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listActiveVariants = `-- name: ListActiveVariants :many
@@ -1488,6 +1637,110 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) (
 	return items, nil
 }
 
+const listNotificationChannelsByWorkspace = `-- name: ListNotificationChannelsByWorkspace :many
+SELECT id, workspace_id, client_id, kind, webhook_url, min_amount_cents, events, is_active, created_at FROM notification_channels WHERE workspace_id = $1 ORDER BY created_at DESC
+`
+
+func (q *Queries) ListNotificationChannelsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]NotificationChannel, error) {
+	rows, err := q.db.Query(ctx, listNotificationChannelsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NotificationChannel
+	for rows.Next() {
+		var i NotificationChannel
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ClientID,
+			&i.Kind,
+			&i.WebhookUrl,
+			&i.MinAmountCents,
+			&i.Events,
+			&i.IsActive,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVariantsWithStats = `-- name: ListVariantsWithStats :many
+SELECT
+    lv.id, lv.link_id, lv.target_url, lv.weight, lv.is_active, lv.created_at,
+    COALESCE(kc.clicks, 0)::bigint AS clicks,
+    COALESCE(cvs.conversions, 0)::bigint AS conversions,
+    COALESCE(cvs.revenue_cents, 0)::bigint AS revenue_cents
+FROM link_variants lv
+LEFT JOIN (
+    SELECT k.variant_id, COUNT(*) AS clicks
+    FROM clicks k
+    WHERE k.link_id = $1 AND k.variant_id IS NOT NULL AND NOT k.is_bot
+    GROUP BY k.variant_id
+) kc ON kc.variant_id = lv.id
+LEFT JOIN (
+    SELECT k.variant_id,
+           COUNT(*) FILTER (WHERE cv.event_type <> 'refund') AS conversions,
+           SUM(cv.amount_cents) AS revenue_cents
+    FROM conversions cv
+    JOIN clicks k ON k.id = cv.click_id
+    WHERE k.link_id = $1 AND k.variant_id IS NOT NULL
+    GROUP BY k.variant_id
+) cvs ON cvs.variant_id = lv.id
+WHERE lv.link_id = $1
+ORDER BY lv.created_at
+`
+
+type ListVariantsWithStatsRow struct {
+	ID           uuid.UUID `json:"id"`
+	LinkID       uuid.UUID `json:"link_id"`
+	TargetUrl    string    `json:"target_url"`
+	Weight       int32     `json:"weight"`
+	IsActive     bool      `json:"is_active"`
+	CreatedAt    time.Time `json:"created_at"`
+	Clicks       int64     `json:"clicks"`
+	Conversions  int64     `json:"conversions"`
+	RevenueCents int64     `json:"revenue_cents"`
+}
+
+// Per-variant clicks (bots excluded) + conversions/revenue via the click each
+// conversion was attributed to.
+func (q *Queries) ListVariantsWithStats(ctx context.Context, linkID uuid.UUID) ([]ListVariantsWithStatsRow, error) {
+	rows, err := q.db.Query(ctx, listVariantsWithStats, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVariantsWithStatsRow
+	for rows.Next() {
+		var i ListVariantsWithStatsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.TargetUrl,
+			&i.Weight,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.Clicks,
+			&i.Conversions,
+			&i.RevenueCents,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVideoCostsByVideo = `-- name: ListVideoCostsByVideo :many
 SELECT id, video_id, kind, amount_cents, note, incurred_on, created_at FROM video_costs WHERE video_id = $1 ORDER BY incurred_on DESC, created_at DESC
 `
@@ -1777,6 +2030,82 @@ func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Trackin
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateLinkVariant = `-- name: UpdateLinkVariant :one
+UPDATE link_variants
+SET weight    = COALESCE($1, weight),
+    is_active = COALESCE($2, is_active)
+WHERE id = $3 AND link_id = $4
+RETURNING id, link_id, target_url, weight, is_active, created_at
+`
+
+type UpdateLinkVariantParams struct {
+	Weight   pgtype.Int4 `json:"weight"`
+	IsActive pgtype.Bool `json:"is_active"`
+	ID       uuid.UUID   `json:"id"`
+	LinkID   uuid.UUID   `json:"link_id"`
+}
+
+// Target URL is intentionally immutable: editing it mid-test would mix data.
+// Caller must verify link ownership (GetLinkByID) first.
+func (q *Queries) UpdateLinkVariant(ctx context.Context, arg UpdateLinkVariantParams) (LinkVariant, error) {
+	row := q.db.QueryRow(ctx, updateLinkVariant,
+		arg.Weight,
+		arg.IsActive,
+		arg.ID,
+		arg.LinkID,
+	)
+	var i LinkVariant
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.TargetUrl,
+		&i.Weight,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateNotificationChannel = `-- name: UpdateNotificationChannel :one
+UPDATE notification_channels
+SET webhook_url = $3, min_amount_cents = $4, events = $5, is_active = $6
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, client_id, kind, webhook_url, min_amount_cents, events, is_active, created_at
+`
+
+type UpdateNotificationChannelParams struct {
+	ID             uuid.UUID `json:"id"`
+	WorkspaceID    uuid.UUID `json:"workspace_id"`
+	WebhookUrl     string    `json:"webhook_url"`
+	MinAmountCents int64     `json:"min_amount_cents"`
+	Events         []string  `json:"events"`
+	IsActive       bool      `json:"is_active"`
+}
+
+func (q *Queries) UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error) {
+	row := q.db.QueryRow(ctx, updateNotificationChannel,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.WebhookUrl,
+		arg.MinAmountCents,
+		arg.Events,
+		arg.IsActive,
+	)
+	var i NotificationChannel
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ClientID,
+		&i.Kind,
+		&i.WebhookUrl,
+		&i.MinAmountCents,
+		&i.Events,
+		&i.IsActive,
+		&i.CreatedAt,
 	)
 	return i, err
 }

@@ -171,6 +171,30 @@ export interface DescriptionInjectionPreview {
   already_injected: boolean
 }
 
+export interface LinkVariant {
+  id: string
+  link_id: string
+  target_url: string
+  weight: number
+  is_active: boolean
+  created_at: string
+  clicks: number
+  conversions: number
+  revenue_cents: number
+}
+
+export interface NotificationChannel {
+  id: string
+  workspace_id: string
+  client_id: string | null
+  kind: "slack" | "discord"
+  webhook_url: string
+  min_amount_cents: number
+  events: string[]
+  is_active: boolean
+  created_at: string
+}
+
 export class ApiError extends Error {
   status: number
   constructor(message: string, status: number) {

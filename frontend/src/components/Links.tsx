@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { InfoTip } from "@/components/InfoTip"
+import { LinkVariantsDialog } from "@/components/LinkVariants"
 
 interface FormState {
   name: string
@@ -35,6 +36,7 @@ export default function Links() {
 
   const [dialog, setDialog] = useState<"create" | Link | null>(null)
   const [form, setForm] = useState<FormState>(empty)
+  const [ab, setAb] = useState<Link | null>(null)
   const editing = dialog && dialog !== "create" ? dialog : null
 
   const done = (msg: string) => {
@@ -159,6 +161,7 @@ export default function Links() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => openEdit(l)}>Edit</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setAb(l)}>A/B variants</DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => update.mutate({ id: l.id, body: { is_active: !l.is_active } })}
                         >
@@ -213,6 +216,8 @@ export default function Links() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {ab && <LinkVariantsDialog clientId={clientId!} link={ab} onClose={() => setAb(null)} />}
     </div>
   )
 }

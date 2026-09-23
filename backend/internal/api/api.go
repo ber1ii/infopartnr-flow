@@ -45,6 +45,14 @@ func (a *API) Routes() http.Handler {
 		r.Use(a.Auth.Middleware)
 		r.Get("/me", a.me)
 
+		r.Route("/notification-channels", func(r chi.Router) {
+			r.Use(auth.RequireStaff)
+			r.Get("/", a.listNotificationChannels)
+			r.Post("/", a.createNotificationChannel)
+			r.Patch("/{channelID}", a.updateNotificationChannel)
+			r.Delete("/{channelID}", a.deleteNotificationChannel)
+		})
+
 		r.Route("/clients", func(r chi.Router) {
 			r.With(auth.RequireStaff).Get("/", a.listClients)
 			r.With(auth.RequireStaff).Post("/", a.createClient)
@@ -76,6 +84,14 @@ func (a *API) Routes() http.Handler {
 					r.With(auth.RequireStaff).Post("/", a.createLink)
 					r.With(auth.RequireStaff).Patch("/{linkID}", a.updateLink)
 					r.With(auth.RequireStaff).Delete("/{linkID}", a.deleteLink)
+
+					r.Route("/{linkID}/variants", func(r chi.Router) {
+						r.Use(auth.RequireStaff)
+						r.Get("/", a.listVariants)
+						r.Post("/", a.createVariant)
+						r.Patch("/{variantID}", a.updateVariant)
+						r.Delete("/{variantID}", a.deleteVariant)
+					})
 				})
 
 				// Video costs: staff-only, mirrors the integrations pattern

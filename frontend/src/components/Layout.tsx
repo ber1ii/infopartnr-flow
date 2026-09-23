@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { BarChart3, Link2, LogOut, Plug, Receipt, TrendingUp, Users, Video } from "lucide-react"
+import { BarChart3, Bell, Link2, LogOut, Plug, Receipt, TrendingUp, Users, Video } from "lucide-react"
 import { api, type Client } from "@/lib/api"
 import { useAuth } from "@/lib/Auth"
 import { cn } from "@/lib/utils"
@@ -23,18 +23,23 @@ export default function Layout() {
   })
 
   const nav = [
-  ...(isStaff ? [{ to: "/clients", label: "Clients", icon: Users }] : []),
-  ...(clientId
-    ? [
-        { to: `/c/${clientId}/overview`, label: "Overview", icon: BarChart3 },
-        { to: `/c/${clientId}/links`, label: "Links", icon: Link2 },
-        { to: `/c/${clientId}/conversions`, label: "Conversions", icon: Receipt },
-        ...(isStaff ? [{ to: `/c/${clientId}/videos`, label: "Videos", icon: Video }] : []),
-        ...(isStaff ? [{ to: `/c/${clientId}/channel-analytics`, label: "Channel analytics", icon: TrendingUp }] : []),
-        ...(isStaff ? [{ to: `/c/${clientId}/integrations`, label: "Integrations", icon: Plug }] : []),
-      ]
-    : []),
-]
+    ...(isStaff
+      ? [
+          { to: "/clients", label: "Clients", icon: Users },
+          { to: "/notifications", label: "Notifications", icon: Bell },
+        ]
+      : []),
+    ...(clientId
+      ? [
+          { to: `/c/${clientId}/overview`, label: "Overview", icon: BarChart3 },
+          { to: `/c/${clientId}/links`, label: "Links", icon: Link2 },
+          { to: `/c/${clientId}/conversions`, label: "Conversions", icon: Receipt },
+          ...(isStaff ? [{ to: `/c/${clientId}/videos`, label: "Videos", icon: Video }] : []),
+          ...(isStaff ? [{ to: `/c/${clientId}/channel-analytics`, label: "Channel analytics", icon: TrendingUp }] : []),
+          ...(isStaff ? [{ to: `/c/${clientId}/integrations`, label: "Integrations", icon: Plug }] : []),
+        ]
+      : []),
+  ]
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">

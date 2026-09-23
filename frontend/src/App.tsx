@@ -10,6 +10,7 @@ import Conversions from "./components/Conversions"
 import Integrations from "./components/Integrations"
 import Videos from "./components/Videos"
 import ChannelAnalytics from "./components/ChannelAnalytics"
+import NotificationChannels from "./components/NotificationChannels"
 
 function Home() {
   const { user } = useAuth()
@@ -35,6 +36,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route element={<Protected staffOnly />}>
             <Route path="/clients" element={<Clients />} />
+            <Route path="/notifications" element={<NotificationChannels />} />
             <Route path="/c/:clientId/integrations" element={<Integrations />} />
             <Route path="/c/:clientId/videos" element={<Videos />} />
             <Route path="/c/:clientId/channel-analytics" element={<ChannelAnalytics />} />
