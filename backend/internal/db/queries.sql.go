@@ -1065,6 +1065,31 @@ func (q *Queries) GetVideo(ctx context.Context, arg GetVideoParams) (Video, erro
 	return i, err
 }
 
+const getVideoLTV = `-- name: GetVideoLTV :one
+SELECT
+    COALESCE(SUM(cv.amount_cents), 0)::bigint AS ltv_cents,
+    COUNT(DISTINCT cv.subscription_id) FILTER (WHERE cv.subscription_id IS NOT NULL)::bigint AS subscription_count
+FROM conversions cv
+WHERE cv.video_id = $1
+`
+
+type GetVideoLTVRow struct {
+	LtvCents          int64 `json:"ltv_cents"`
+	SubscriptionCount int64 `json:"subscription_count"`
+}
+
+// Lifetime revenue attributed to this video across all conversions and all
+// time -- deliberately NOT bounded by from_ts/to_ts like GetVideoOverview.
+// Renewals keep accruing to the same video indefinitely, so LTV is the
+// all-time sum, not a windowed one. Refunds are already negative amounts,
+// so they net out naturally.
+func (q *Queries) GetVideoLTV(ctx context.Context, videoID uuid.NullUUID) (GetVideoLTVRow, error) {
+	row := q.db.QueryRow(ctx, getVideoLTV, videoID)
+	var i GetVideoLTVRow
+	err := row.Scan(&i.LtvCents, &i.SubscriptionCount)
+	return i, err
+}
+
 const getVideoOverview = `-- name: GetVideoOverview :one
 SELECT
     (SELECT COUNT(*) FROM clicks k

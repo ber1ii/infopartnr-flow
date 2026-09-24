@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
+	"github.com/go-chi/httprate"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"github.com/oschwald/geoip2-golang"
@@ -23,6 +25,7 @@ import (
 	"infopartnr-flow/backend/internal/config"
 	"infopartnr-flow/backend/internal/crypto"
 	"infopartnr-flow/backend/internal/db"
+	"infopartnr-flow/backend/internal/netutil"
 	"infopartnr-flow/backend/internal/notify"
 	"infopartnr-flow/backend/internal/redirect"
 	"infopartnr-flow/backend/internal/webhooks"
@@ -75,15 +78,26 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{cfg.AppURL},
+		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
+
+	rateLimitKey := func(r *http.Request) (string, error) {
+		return httprate.CanonicalizeIP(netutil.ClientIP(r, cfg.TrustProxy)), nil
+	}
+	r.Use(httprate.LimitBy(100, time.Minute, rateLimitKey))
+
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	r.Get("/track.js", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 		http.ServeFile(w, req, cfg.TrackJSPath)
 	})
-	apiH := &api.API{Q: q, Pool: pool, Auth: auth.NewManager(cfg.JWTSecret, cfg.JWTTTL), Cache: cache, AppURL: cfg.AppURL, Box: box, PublicURL: cfg.PublicURL, GoogleClientID: cfg.GoogleClientID, GoogleClientSecret: cfg.GoogleClientSecret}
-	// No periodic sync: quota-heavy at scale, and the user wants manual
-	// control via the refresh button / POST .../youtube/sync instead.
+	apiH := &api.API{Q: q, Pool: pool, Auth: auth.NewManager(cfg.JWTSecret, cfg.JWTTTL), Cache: cache, AppURL: cfg.AppURL, Box: box, PublicURL: cfg.PublicURL, GoogleClientID: cfg.GoogleClientID, GoogleClientSecret: cfg.GoogleClientSecret, TrustProxy: cfg.TrustProxy}
 	r.Mount("/api", apiH.Routes())
 
 	slackNotify := &notify.Slack{Q: q}

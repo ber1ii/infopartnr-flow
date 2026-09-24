@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/httprate"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,27 +15,33 @@ import (
 	"infopartnr-flow/backend/internal/auth"
 	"infopartnr-flow/backend/internal/crypto"
 	"infopartnr-flow/backend/internal/db"
+	"infopartnr-flow/backend/internal/netutil"
 	"infopartnr-flow/backend/internal/redirect"
 )
 
 type API struct {
-	Q    *db.Queries
-	Pool *pgxpool.Pool
-	Auth *auth.Manager
-	// Cache is the redirect cache; link edits must invalidate it.
+	Q                  *db.Queries
+	Pool               *pgxpool.Pool
+	Auth               *auth.Manager
 	Cache              *redirect.Cache
 	AppURL             string
-	Box                *crypto.Box // encrypts integration secrets + youtube oauth state
-	PublicURL          string      // backend public base URL, shown in webhook URLs and the oauth callback
+	Box                *crypto.Box
+	PublicURL          string
 	GoogleClientID     string
 	GoogleClientSecret string
+	TrustProxy         bool // for rate-limit key resolution; see netutil.ClientIP
 }
 
 func (a *API) Routes() http.Handler {
 	r := chi.NewRouter()
 
-	r.Post("/auth/register", a.register) // bootstrap only: works while no users exist
-	r.Post("/auth/login", a.login)
+	loginKey := func(r *http.Request) (string, error) {
+		return httprate.CanonicalizeIP(netutil.ClientIP(r, a.TrustProxy)), nil
+	}
+	loginLimiter := httprate.LimitBy(5, time.Minute, loginKey)
+
+	r.With(loginLimiter).Post("/auth/register", a.register)
+	r.With(loginLimiter).Post("/auth/login", a.login)
 	r.Get("/invites/{token}", a.inviteInfo)           // public
 	r.Post("/invites/{token}/accept", a.acceptInvite) // public
 

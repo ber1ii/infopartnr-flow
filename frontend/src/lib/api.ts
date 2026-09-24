@@ -112,6 +112,8 @@ export interface VideoAnalytics {
   clicks: number
   conversions: number
   revenue_cents: number
+  ltv_cents: number
+  subscription_count: number
 }
 
 export interface YoutubeChannel {

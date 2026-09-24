@@ -474,6 +474,18 @@ SELECT
       WHERE cv.video_id = sqlc.arg(video_id)
         AND cv.occurred_at >= sqlc.arg(from_ts) AND cv.occurred_at < sqlc.arg(to_ts))::bigint AS revenue_cents;
 
+-- Lifetime revenue attributed to this video across all conversions and all
+-- time -- deliberately NOT bounded by from_ts/to_ts like GetVideoOverview.
+-- Renewals keep accruing to the same video indefinitely, so LTV is the
+-- all-time sum, not a windowed one. Refunds are already negative amounts,
+-- so they net out naturally.
+-- name: GetVideoLTV :one
+SELECT
+    COALESCE(SUM(cv.amount_cents), 0)::bigint AS ltv_cents,
+    COUNT(DISTINCT cv.subscription_id) FILTER (WHERE cv.subscription_id IS NOT NULL)::bigint AS subscription_count
+FROM conversions cv
+WHERE cv.video_id = sqlc.arg(video_id);
+
 -- ===== Channel analytics =====
 
 -- name: UpsertChannelStatDaily :exec

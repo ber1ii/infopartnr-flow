@@ -134,10 +134,12 @@ type videoStatPoint struct {
 }
 
 type videoAnalyticsResp struct {
-	Daily        []videoStatPoint `json:"daily"`
-	Clicks       int64            `json:"clicks"`
-	Conversions  int64            `json:"conversions"`
-	RevenueCents int64            `json:"revenue_cents"`
+	Daily             []videoStatPoint `json:"daily"`
+	Clicks            int64            `json:"clicks"`
+	Conversions       int64            `json:"conversions"`
+	RevenueCents      int64            `json:"revenue_cents"`
+	LtvCents          int64            `json:"ltv_cents"`
+	SubscriptionCount int64            `json:"subscription_count"`
 }
 
 // videoAnalytics backs the per-video expansion on the Videos page: a
@@ -145,6 +147,8 @@ type videoAnalyticsResp struct {
 // plus this app's own funnel numbers for the video in the same window.
 // Cost isn't included -- the caller already has the lifetime total from
 // listVideos and can compute ROI against that.
+// LTV is lifetime, unlike everything else in the response which is windowed
+// by days
 func (a *API) videoAnalytics(w http.ResponseWriter, r *http.Request) {
 	v, ok := a.videoCtx(r)
 	if !ok {
@@ -174,6 +178,7 @@ func (a *API) videoAnalytics(w http.ResponseWriter, r *http.Request) {
 	ov, err := a.Q.GetVideoOverview(r.Context(), db.GetVideoOverviewParams{
 		VideoID: uuid.NullUUID{UUID: v.ID, Valid: true}, FromTs: from, ToTs: to,
 	})
+	ltv, err := a.Q.GetVideoLTV(r.Context(), uuid.NullUUID{UUID: v.ID, Valid: true})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
@@ -181,5 +186,6 @@ func (a *API) videoAnalytics(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, videoAnalyticsResp{
 		Daily: daily, Clicks: ov.Clicks, Conversions: ov.Conversions, RevenueCents: ov.RevenueCents,
+		LtvCents: ltv.LtvCents, SubscriptionCount: ltv.SubscriptionCount,
 	})
 }

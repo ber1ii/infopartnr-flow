@@ -273,7 +273,7 @@ function StripeCard({
           <div className="space-y-3 rounded-md border p-4">
             <div className="text-sm font-medium">1. Add a webhook in Stripe</div>
             <p className="text-sm text-muted-foreground">
-              Stripe Dashboard → Developers → Webhooks → Add endpoint. Paste this URL and select the events below. The URL must be publicly reachable (use the Stripe CLI while developing locally).
+              Stripe Dashboard → Developers → Webhooks → Add endpoint. Paste this URL and select the events below.
             </p>
             <CopyRow label="Webhook URL" value={stripe.webhook_url} />
             <CopyRow label="Events to send" value={STRIPE_EVENTS.join(",")} />
@@ -391,7 +391,7 @@ function TypeformCard({
 
           <div className="space-y-1 text-sm text-muted-foreground">
             <div className="font-medium text-foreground">Setup requirements</div>
-            <p>Add a hidden field named <code>trakyo_id</code> to the form — track.js fills it in automatically.</p>
+            <p>Add a URL parameter named <code>trakyo_id</code> to the form — track.js fills it in automatically.</p>
             <p>Add an Email-type question so the submission includes an email answer.</p>
           </div>
 
