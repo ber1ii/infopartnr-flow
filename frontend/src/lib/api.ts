@@ -210,12 +210,14 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY)
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE ?? ""
+
 export async function api<T>(
   path: string,
   opts: { method?: string; body?: unknown } = {},
 ): Promise<T> {
   const token = localStorage.getItem(TOKEN_KEY)
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}/api${path}`, {
     method: opts.method ?? (opts.body !== undefined ? "POST" : "GET"),
     headers: {
       ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
