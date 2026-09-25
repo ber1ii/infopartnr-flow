@@ -2021,17 +2021,19 @@ UPDATE tracking_links
 SET name       = COALESCE($1, name),
     target_url = COALESCE($2, target_url),
     is_active  = COALESCE($3, is_active),
+    video_id   = COALESCE($4, video_id),
     updated_at = now()
-WHERE id = $4 AND client_id = $5
+WHERE id = $5 AND client_id = $6
 RETURNING id, client_id, video_id, domain_id, slug, name, target_url, is_active, expires_at, created_at, updated_at
 `
 
 type UpdateLinkParams struct {
-	Name      pgtype.Text `json:"name"`
-	TargetUrl pgtype.Text `json:"target_url"`
-	IsActive  pgtype.Bool `json:"is_active"`
-	ID        uuid.UUID   `json:"id"`
-	ClientID  uuid.UUID   `json:"client_id"`
+	Name      pgtype.Text   `json:"name"`
+	TargetUrl pgtype.Text   `json:"target_url"`
+	IsActive  pgtype.Bool   `json:"is_active"`
+	VideoID   uuid.NullUUID `json:"video_id"`
+	ID        uuid.UUID     `json:"id"`
+	ClientID  uuid.UUID     `json:"client_id"`
 }
 
 func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (TrackingLink, error) {
@@ -2039,6 +2041,7 @@ func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Trackin
 		arg.Name,
 		arg.TargetUrl,
 		arg.IsActive,
+		arg.VideoID,
 		arg.ID,
 		arg.ClientID,
 	)

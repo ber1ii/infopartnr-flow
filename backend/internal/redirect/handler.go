@@ -53,6 +53,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := newTrakyoID()
+	target = decorateForProvider(target, id)
 	dest, err := withParam(target, "trakyo_id", id)
 	if err != nil {
 		log.Printf("bad target url on link %s: %v", link.ID, err)
@@ -173,6 +174,36 @@ func pickVariant(vs []Variant) *Variant {
 		}
 	}
 	return &vs[len(vs)-1]
+}
+
+// decorateForProvider mirrors track.js's per-provider decoration rules,
+// applied server-side so direct-to-provider target_urls (no client page in
+// between) still get attribution. The generic trakyo_id param is appended
+// separately by the caller via withParam; this only adds provider-specific
+// extras. checkout.stripe.com is intentionally left untouched: it needs
+// client_reference_id set server-side at Checkout Session creation time on
+// the client's own backend, which a redirect can't do.
+func decorateForProvider(target, trakyoID string) string {
+	u, err := url.Parse(target)
+	if err != nil {
+		return target
+	}
+	host := strings.ToLower(u.Hostname())
+
+	switch {
+	case host == "buy.stripe.com" || strings.HasSuffix(host, ".buy.stripe.com"):
+		if out, err := withParam(target, "client_reference_id", trakyoID); err == nil {
+			return out
+		}
+	case host == "calendly.com" || strings.HasSuffix(host, ".calendly.com"):
+		if out, err := withParam(target, "utm_content", trakyoID); err == nil {
+			return out
+		}
+	case host == "typeform.com" || strings.HasSuffix(host, ".typeform.com"):
+		// trakyo_id itself is added by the caller for all targets already;
+		// standalone Typeform links need nothing further.
+	}
+	return target
 }
 
 // withParam appends k=v while preserving the original query order and fragment.

@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Copy, MoreHorizontal, Plus } from "lucide-react"
 import { toast } from "sonner"
-import { api, errMsg, type Link } from "@/lib/api"
+import { api, errMsg, type Link, type Video } from "@/lib/api"
 import { useAuth } from "@/lib/Auth"
 import { shortDate, shortUrl } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { InfoTip } from "@/components/InfoTip"
@@ -22,8 +23,9 @@ interface FormState {
   name: string
   target: string
   slug: string
+  videoId: string // "" = none
 }
-const empty: FormState = { name: "", target: "", slug: "" }
+const empty: FormState = { name: "", target: "", slug: "", videoId: "" }
 
 export default function Links() {
   const { clientId } = useParams()
@@ -33,6 +35,10 @@ export default function Links() {
   const key = ["links", clientId]
 
   const links = useQuery({ queryKey: key, queryFn: () => api<Link[]>(`/clients/${clientId}/links`) })
+  const videos = useQuery({
+    queryKey: ["videos", clientId],
+    queryFn: () => api<Video[]>(`/clients/${clientId}/videos`),
+  })
 
   const [dialog, setDialog] = useState<"create" | Link | null>(null)
   const [form, setForm] = useState<FormState>(empty)
@@ -47,7 +53,12 @@ export default function Links() {
   const create = useMutation({
     mutationFn: () =>
       api<Link>(`/clients/${clientId}/links`, {
-        body: { name: form.name, target_url: form.target, ...(form.slug ? { slug: form.slug } : {}) },
+        body: {
+          name: form.name,
+          target_url: form.target,
+          ...(form.slug ? { slug: form.slug } : {}),
+          ...(form.videoId ? { video_id: form.videoId } : {}),
+        },
       }),
     onSuccess: () => done("Link created"),
     onError: (e) => toast.error(errMsg(e)),
@@ -69,12 +80,20 @@ export default function Links() {
     setDialog("create")
   }
   const openEdit = (l: Link) => {
-    setForm({ name: l.name, target: l.target_url, slug: l.slug })
+    setForm({ name: l.name, target: l.target_url, slug: l.slug, videoId: l.video_id ?? "" })
     setDialog(l)
   }
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (editing) update.mutate({ id: editing.id, body: { name: form.name, target_url: form.target } })
+    if (editing)
+      update.mutate({
+        id: editing.id,
+        body: {
+          name: form.name,
+          target_url: form.target,
+          ...(form.videoId ? { video_id: form.videoId } : {}),
+        },
+      })
     else create.mutate()
   }
   const copy = (text: string) => {
@@ -208,6 +227,22 @@ export default function Links() {
                 <Input id="lslug" placeholder="my-offer" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
               </div>
             )}
+            <div className="space-y-2">
+              <Label htmlFor="lvideo">Video (optional)</Label>
+              <Select value={form.videoId || "none"} onValueChange={(v) => setForm({ ...form, videoId: !v || v === "none" ? "" : v })}>
+                <SelectTrigger id="lvideo">
+                  <SelectValue placeholder="Not tied to a video" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not tied to a video</SelectItem>
+                  {videos.data?.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      {v.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <DialogFooter>
               <Button type="submit" disabled={create.isPending || update.isPending}>
                 {editing ? "Save changes" : "Create link"}

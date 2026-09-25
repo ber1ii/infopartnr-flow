@@ -123,6 +123,7 @@ UPDATE tracking_links
 SET name       = COALESCE(sqlc.narg('name'), name),
     target_url = COALESCE(sqlc.narg('target_url'), target_url),
     is_active  = COALESCE(sqlc.narg('is_active'), is_active),
+    video_id   = COALESCE(sqlc.narg('video_id'), video_id),
     updated_at = now()
 WHERE id = sqlc.arg('id') AND client_id = sqlc.arg('client_id')
 RETURNING *;

@@ -118,9 +118,10 @@ func (a *API) updateLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name      *string `json:"name"`
-		TargetURL *string `json:"target_url"`
-		IsActive  *bool   `json:"is_active"`
+		Name      *string    `json:"name"`
+		TargetURL *string    `json:"target_url"`
+		IsActive  *bool      `json:"is_active"`
+		VideoID   *uuid.UUID `json:"video_id"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -140,6 +141,13 @@ func (a *API) updateLink(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.IsActive != nil {
 		params.IsActive = pgtype.Bool{Bool: *req.IsActive, Valid: true}
+	}
+	if req.VideoID != nil {
+		if _, err := a.Q.GetVideo(r.Context(), db.GetVideoParams{ID: *req.VideoID, ClientID: c.ID}); err != nil {
+			writeErr(w, http.StatusBadRequest, "video not found for this client")
+			return
+		}
+		params.VideoID = uuid.NullUUID{UUID: *req.VideoID, Valid: true}
 	}
 
 	link, err := a.Q.UpdateLink(r.Context(), params)
