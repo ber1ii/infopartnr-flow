@@ -36,7 +36,7 @@ export default function Layout() {
           { to: `/c/${clientId}/conversions`, label: "Conversions", icon: Receipt },
           ...(isStaff ? [{ to: `/c/${clientId}/videos`, label: "Videos", icon: Video }] : []),
           ...(isStaff ? [{ to: `/c/${clientId}/channel-analytics`, label: "Channel analytics", icon: TrendingUp }] : []),
-          ...(isStaff ? [{ to: `/c/${clientId}/integrations`, label: "Integrations", icon: Plug }] : []),
+          { to: `/c/${clientId}/integrations`, label: "Integrations", icon: Plug },
         ]
       : []),
   ]
