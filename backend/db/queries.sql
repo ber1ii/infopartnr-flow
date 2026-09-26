@@ -365,7 +365,11 @@ WHERE client_id = sqlc.arg(client_id) AND source = sqlc.arg(source) AND external
 
 -- name: UpdateConversionOnReschedule :execrows
 UPDATE conversions
-SET external_id = sqlc.arg(new_external_id), occurred_at = sqlc.arg(occurred_at)
+SET external_id = sqlc.arg(new_external_id),
+    occurred_at = sqlc.arg(occurred_at),
+    click_id = COALESCE(sqlc.narg(click_id), click_id),
+    link_id = COALESCE(sqlc.narg(link_id), link_id),
+    attribution_method = COALESCE(sqlc.narg(attribution_method), attribution_method)
 WHERE id = sqlc.arg(id) AND client_id = sqlc.arg(client_id);
 
 -- ===== Video costs =====

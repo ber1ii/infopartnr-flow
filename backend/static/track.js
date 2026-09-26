@@ -196,7 +196,18 @@
       const hasElementNodes = mutations.some((m) =>
         Array.from(m.addedNodes || []).some((n) => n.nodeType === 1)
       );
-      if (!hasElementNodes) return;
+      // Some embed widgets (e.g. Calendly's JS widget) insert a blank
+      // iframe first and set its src a moment later, once their own config
+      // resolves -- childList alone misses that. Watching src/href
+      // mutations catches the decoration moment even when it's not a fresh
+      // node. decorateRoot re-checks dataset.trakyoDecorated per element,
+      // so this never double-decorates an already-handled element.
+      const hasRelevantAttrChange = mutations.some((m) =>
+        m.type === 'attributes' &&
+        (m.attributeName === 'src' || m.attributeName === 'href') &&
+        m.target.nodeType === 1
+      );
+      if (!hasElementNodes && !hasRelevantAttrChange) return;
 
       pending = true;
       // Debounce: batch bursts of DOM changes (e.g. a widget rendering many
@@ -211,6 +222,8 @@
     observer.observe(document.body || document.documentElement, {
       childList: true,
       subtree: true,
+      attributes: true,
+      attributeFilter: ['src', 'href'],
     });
   }
 

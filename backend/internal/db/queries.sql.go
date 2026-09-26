@@ -1992,21 +1992,31 @@ func (q *Queries) UpdateChannelSyncStatus(ctx context.Context, id uuid.UUID) err
 
 const updateConversionOnReschedule = `-- name: UpdateConversionOnReschedule :execrows
 UPDATE conversions
-SET external_id = $1, occurred_at = $2
-WHERE id = $3 AND client_id = $4
+SET external_id = $1,
+    occurred_at = $2,
+    click_id = COALESCE($3, click_id),
+    link_id = COALESCE($4, link_id),
+    attribution_method = COALESCE($5, attribution_method)
+WHERE id = $6 AND client_id = $7
 `
 
 type UpdateConversionOnRescheduleParams struct {
-	NewExternalID string    `json:"new_external_id"`
-	OccurredAt    time.Time `json:"occurred_at"`
-	ID            int64     `json:"id"`
-	ClientID      uuid.UUID `json:"client_id"`
+	NewExternalID     string        `json:"new_external_id"`
+	OccurredAt        time.Time     `json:"occurred_at"`
+	ClickID           pgtype.Int8   `json:"click_id"`
+	LinkID            uuid.NullUUID `json:"link_id"`
+	AttributionMethod pgtype.Text   `json:"attribution_method"`
+	ID                int64         `json:"id"`
+	ClientID          uuid.UUID     `json:"client_id"`
 }
 
 func (q *Queries) UpdateConversionOnReschedule(ctx context.Context, arg UpdateConversionOnRescheduleParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateConversionOnReschedule,
 		arg.NewExternalID,
 		arg.OccurredAt,
+		arg.ClickID,
+		arg.LinkID,
+		arg.AttributionMethod,
 		arg.ID,
 		arg.ClientID,
 	)

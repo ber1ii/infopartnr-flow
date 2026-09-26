@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"infopartnr-flow/backend/internal/crypto"
 	"infopartnr-flow/backend/internal/db"
@@ -106,9 +107,20 @@ func (c *Calendly) Serve(w http.ResponseWriter, r *http.Request) {
 			ClientID: integ.ClientID, Source: "calendly", ExternalID: oldID,
 		})
 		if err == nil {
-			_, _ = c.Q.UpdateConversionOnReschedule(ctx, db.UpdateConversionOnRescheduleParams{
+			params := db.UpdateConversionOnRescheduleParams{
 				ID: existing.ID, ClientID: integ.ClientID, NewExternalID: externalID, OccurredAt: occurred,
-			})
+			}
+			if existing.AttributionMethod == "none" {
+				trakyoID := payload.Payload.Tracking.UTMContent
+				email := strings.ToLower(strings.TrimSpace(payload.Payload.Email))
+				clickID, linkID, _, method := resolveAttribution(ctx, c.Q, integ.ClientID, trakyoID, email)
+				if method != "none" {
+					params.ClickID = pgtype.Int8{Int64: *clickID, Valid: true}
+					params.LinkID = uuid.NullUUID{UUID: *linkID, Valid: true}
+					params.AttributionMethod = pgtype.Text{String: method, Valid: true}
+				}
+			}
+			_, _ = c.Q.UpdateConversionOnReschedule(ctx, params)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -116,8 +128,6 @@ func (c *Calendly) Serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		// old invitee not found (booking predates this integration, or was
-		// never attributed) -- fall through and record a new booked_call.
 	}
 
 	trakyoID := payload.Payload.Tracking.UTMContent

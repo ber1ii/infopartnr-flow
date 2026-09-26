@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -77,14 +78,23 @@ func secureEqual(a, b string) bool {
 	return hmac.Equal([]byte(a), []byte(b))
 }
 
-// resolveAttribution tries track-id attribution first (a hidden field or
-// tracking param carrying our trakyo_id), then falls back to the most
-// recent click linked to the given email via /collect, and otherwise
-// reports no attribution -- the conversion still gets recorded either way.
 func resolveAttribution(ctx context.Context, q *db.Queries, clientID uuid.UUID, trakyoID, email string) (clickID *int64, linkID, videoID *uuid.UUID, method string) {
+	trakyoID = strings.TrimSpace(trakyoID)
+	email = strings.ToLower(strings.TrimSpace(email))
+
 	if trakyoID != "" {
 		if c, err := q.GetClickForClient(ctx, db.GetClickForClientParams{TrakyoID: trakyoID, ClientID: clientID}); err == nil {
 			id, link := c.ID, c.LinkID
+			// This is often the only moment in the whole funnel where we see
+			// both a trakyo_id and an email in the same event -- e.g. the
+			// Typeform submission, or a Calendly booking whose link/embed
+			// still carried the param. Persist it now: Stripe checkout
+			// sessions are frequently created days later, on a different
+			// device, by a sales rep who only has the email -- that lookup
+			// depends entirely on this write happening here.
+			if email != "" {
+				_ = q.UpsertIdentity(ctx, db.UpsertIdentityParams{ClientID: clientID, Email: email, TrakyoID: trakyoID})
+			}
 			return &id, &link, nullUUIDPtr(c.VideoID), "track_id"
 		}
 	}

@@ -80,7 +80,6 @@ func (a *API) Routes() http.Handler {
 				})
 
 				r.Route("/integrations", func(r chi.Router) {
-					r.Use(auth.RequireStaff)
 					r.Get("/", a.listIntegrations)
 					r.Post("/", a.createIntegration)
 					r.Put("/{integrationID}/secret", a.setIntegrationSecret)
