@@ -8,6 +8,7 @@ import Overview from "./components/Overview"
 import Links from "./components/Links"
 import Conversions from "./components/Conversions"
 import Integrations from "./components/Integrations"
+import IntegrationsGuide from "./components/IntegrationsGuide"
 import Videos from "./components/Videos"
 import ChannelAnalytics from "./components/ChannelAnalytics"
 import NotificationChannels from "./components/NotificationChannels"
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="/c/:clientId/links" element={<Links />} />
           <Route path="/c/:clientId/conversions" element={<Conversions />} />
           <Route path="/c/:clientId/integrations" element={<Integrations />} />
+          <Route path="/c/:clientId/integrations/guide" element={<IntegrationsGuide />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

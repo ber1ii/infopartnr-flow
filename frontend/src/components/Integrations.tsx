@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react"
-import { useParams, useSearchParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Copy, CreditCard, FileText, PhoneCall } from "lucide-react"
+import { BookOpen, Copy, CreditCard, FileText, PhoneCall } from "lucide-react"
 import { toast } from "sonner"
 import { api, errMsg, type Integration, type YoutubeChannel } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
@@ -66,6 +66,7 @@ function StatusBadge({ loading, active }: { loading: boolean; active: "yes" | "n
 
 export default function Integrations() {
   const { clientId } = useParams()
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const key = ["integrations", clientId]
   const base = `/clients/${clientId}/integrations`
@@ -107,12 +108,18 @@ export default function Integrations() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold">
-          Integrations
-          <InfoTip text="Connect the tools this client uses to get paid, book calls and capture leads. Each one tells us when something happens, and we match it back to the video link the person clicked." />
-        </h1>
-        <p className="text-sm text-muted-foreground">Connect payments, calls, forms and YouTube itself.</p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold">
+            Integrations
+            <InfoTip text="Connect the tools this client uses to get paid, book calls and capture leads. Each one tells us when something happens, and we match it back to the video link the person clicked." />
+          </h1>
+          <p className="text-sm text-muted-foreground">Connect payments, calls, forms and YouTube itself.</p>
+        </div>
+        <Button variant="outline" onClick={() => navigate(`/c/${clientId}/integrations/guide`)}>
+          <BookOpen className="size-4" />
+          Setup guide
+        </Button>
       </div>
 
       <YouTubeCard base={`/clients/${clientId}/youtube`} />
