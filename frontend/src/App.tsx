@@ -37,13 +37,13 @@ export default function App() {
           <Route element={<Protected staffOnly />}>
             <Route path="/clients" element={<Clients />} />
             <Route path="/notifications" element={<NotificationChannels />} />
-            <Route path="/c/:clientId/integrations" element={<Integrations />} />
             <Route path="/c/:clientId/videos" element={<Videos />} />
             <Route path="/c/:clientId/channel-analytics" element={<ChannelAnalytics />} />
           </Route>
           <Route path="/c/:clientId/overview" element={<Overview />} />
           <Route path="/c/:clientId/links" element={<Links />} />
           <Route path="/c/:clientId/conversions" element={<Conversions />} />
+          <Route path="/c/:clientId/integrations" element={<Integrations />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
