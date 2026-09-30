@@ -79,11 +79,23 @@ func (a *API) Routes() http.Handler {
 					r.Post("/", a.createInvite)
 				})
 
+				// Self-serve: client-role users manage their own client's
+				// integrations. clientCtx (above, on /{clientID}) is the
+				// actual tenant boundary -- it already 404s a client-role
+				// user for any clientID but their own -- so no RequireStaff
+				// gate is needed here, same pattern as /links.
 				r.Route("/integrations", func(r chi.Router) {
 					r.Get("/", a.listIntegrations)
 					r.Post("/", a.createIntegration)
 					r.Put("/{integrationID}/secret", a.setIntegrationSecret)
 					r.Delete("/{integrationID}", a.deleteIntegration)
+				})
+
+				// Called by the client's own backend before creating a Stripe
+				// Checkout Session, to set client_reference_id even when the
+				// session is created days later on a different device.
+				r.Route("/attribution", func(r chi.Router) {
+					r.Get("/lookup", a.lookupAttribution)
 				})
 
 				r.Route("/links", func(r chi.Router) {
