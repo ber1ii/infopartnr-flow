@@ -42,13 +42,14 @@ type Click struct {
 }
 
 type Client struct {
-	ID           uuid.UUID `json:"id"`
-	WorkspaceID  uuid.UUID `json:"workspace_id"`
-	Name         string    `json:"name"`
-	ContactEmail string    `json:"contact_email"`
-	Timezone     string    `json:"timezone"`
-	Currency     string    `json:"currency"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           uuid.UUID  `json:"id"`
+	WorkspaceID  uuid.UUID  `json:"workspace_id"`
+	Name         string     `json:"name"`
+	ContactEmail string     `json:"contact_email"`
+	Timezone     string     `json:"timezone"`
+	Currency     string     `json:"currency"`
+	ArchivedAt   *time.Time `json:"archived_at"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 type Conversion struct {

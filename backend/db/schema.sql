@@ -26,6 +26,7 @@ CREATE TABLE clients (
     contact_email TEXT NOT NULL DEFAULT '',
     timezone TEXT NOT NULL DEFAULT 'UTC',
     currency TEXT NOT NULL DEFAULT 'USD',
+    archived_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX clients_workspace_idx ON clients (workspace_id);

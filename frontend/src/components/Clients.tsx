@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Copy, Plus } from "lucide-react"
+import { Archive, Copy, Plus, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 import { api, errMsg, type Client, type Invite } from "@/lib/api"
 import { shortDate } from "@/lib/format"
@@ -15,7 +15,33 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 export default function Clients() {
   const qc = useQueryClient()
-  const clients = useQuery({ queryKey: ["clients"], queryFn: () => api<Client[]>("/clients") })
+  const [showArchived, setShowArchived] = useState(false)
+  const clients = useQuery({
+    queryKey: ["clients", { archived: showArchived }],
+    queryFn: () => api<Client[]>(`/clients${showArchived ? "?archived=true" : ""}`),
+  })
+
+  const invalidateClients = () => qc.invalidateQueries({ queryKey: ["clients"] })
+
+  const [archiveTarget, setArchiveTarget] = useState<Client | null>(null)
+  const archiveClient = useMutation({
+    mutationFn: (id: string) => api(`/clients/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidateClients()
+      toast.success("Client archived")
+      setArchiveTarget(null)
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  })
+
+  const restoreClient = useMutation({
+    mutationFn: (id: string) => api(`/clients/${id}/restore`, { method: "POST" }),
+    onSuccess: () => {
+      invalidateClients()
+      toast.success("Client restored")
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  })
 
   const [addOpen, setAddOpen] = useState(false)
   const [name, setName] = useState("")
@@ -61,9 +87,14 @@ export default function Clients() {
           <h1 className="text-2xl font-semibold">Clients</h1>
           <p className="text-sm text-muted-foreground">Everyone whose YouTube funnel you track.</p>
         </div>
-        <Button onClick={() => setAddOpen(true)}>
-          <Plus className="size-4" /> Add client
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowArchived((v) => !v)}>
+            {showArchived ? "Show active" : "Show archived"}
+          </Button>
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus className="size-4" /> Add client
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -87,7 +118,7 @@ export default function Clients() {
             {clients.data?.length === 0 && (
               <TableRow>
                 <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                  No clients yet. Add your first one.
+                  {showArchived ? "No archived clients." : "No clients yet. Add your first one."}
                 </TableCell>
               </TableRow>
             )}
@@ -97,12 +128,28 @@ export default function Clients() {
                 <TableCell className="text-muted-foreground">{c.contact_email || "-"}</TableCell>
                 <TableCell className="text-muted-foreground">{shortDate(c.created_at)}</TableCell>
                 <TableCell className="space-x-2 text-right">
-                  <Button variant="outline" size="sm" onClick={() => openInvite(c)}>
-                    Invite
-                  </Button>
-                  <Link to={`/c/${c.id}/overview`} className={buttonVariants({ size: "sm" })}>
-                    Open
-                  </Link>
+                  {showArchived ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => restoreClient.mutate(c.id)}
+                      disabled={restoreClient.isPending}
+                    >
+                      <RotateCcw className="size-4" /> Restore
+                    </Button>
+                  ) : (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => openInvite(c)}>
+                        Invite
+                      </Button>
+                      <Link to={`/c/${c.id}/overview`} className={buttonVariants({ size: "sm" })}>
+                        Open
+                      </Link>
+                      <Button variant="outline" size="sm" onClick={() => setArchiveTarget(c)}>
+                        <Archive className="size-4" /> Archive
+                      </Button>
+                    </>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -177,6 +224,30 @@ export default function Clients() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!archiveTarget} onOpenChange={(o) => !o && setArchiveTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Archive {archiveTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              This hides the client from your list — nothing is deleted. Their links, conversions and integrations
+              stay exactly as they are, and you can restore them anytime from "Show archived".
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => archiveTarget && archiveClient.mutate(archiveTarget.id)}
+              disabled={archiveClient.isPending}
+            >
+              Archive
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

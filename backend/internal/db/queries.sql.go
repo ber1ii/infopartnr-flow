@@ -74,6 +74,23 @@ func (q *Queries) AddVideoCost(ctx context.Context, arg AddVideoCostParams) (Vid
 	return i, err
 }
 
+const archiveClient = `-- name: ArchiveClient :execrows
+UPDATE clients SET archived_at = now() WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
+`
+
+type ArchiveClientParams struct {
+	ID          uuid.UUID `json:"id"`
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ArchiveClient(ctx context.Context, arg ArchiveClientParams) (int64, error) {
+	result, err := q.db.Exec(ctx, archiveClient, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const cancelSubscription = `-- name: CancelSubscription :exec
 UPDATE subscriptions
 SET status = 'canceled', canceled_at = now()
@@ -156,7 +173,7 @@ const createClient = `-- name: CreateClient :one
 
 INSERT INTO clients (workspace_id, name, contact_email, timezone, currency)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, workspace_id, name, contact_email, timezone, currency, created_at
+RETURNING id, workspace_id, name, contact_email, timezone, currency, archived_at, created_at
 `
 
 type CreateClientParams struct {
@@ -184,6 +201,7 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) (Cli
 		&i.ContactEmail,
 		&i.Timezone,
 		&i.Currency,
+		&i.ArchivedAt,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -732,7 +750,7 @@ func (q *Queries) GetClickForClient(ctx context.Context, arg GetClickForClientPa
 }
 
 const getClient = `-- name: GetClient :one
-SELECT id, workspace_id, name, contact_email, timezone, currency, created_at FROM clients WHERE id = $1 AND workspace_id = $2
+SELECT id, workspace_id, name, contact_email, timezone, currency, archived_at, created_at FROM clients WHERE id = $1 AND workspace_id = $2
 `
 
 type GetClientParams struct {
@@ -750,6 +768,7 @@ func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (Client, e
 		&i.ContactEmail,
 		&i.Timezone,
 		&i.Currency,
+		&i.ArchivedAt,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -1263,6 +1282,39 @@ func (q *Queries) ListActiveVariants(ctx context.Context, linkID uuid.UUID) ([]L
 	return items, nil
 }
 
+const listArchivedClientsByWorkspace = `-- name: ListArchivedClientsByWorkspace :many
+SELECT id, workspace_id, name, contact_email, timezone, currency, archived_at, created_at FROM clients WHERE workspace_id = $1 AND archived_at IS NOT NULL ORDER BY archived_at DESC
+`
+
+func (q *Queries) ListArchivedClientsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]Client, error) {
+	rows, err := q.db.Query(ctx, listArchivedClientsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Client
+	for rows.Next() {
+		var i Client
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.ContactEmail,
+			&i.Timezone,
+			&i.Currency,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelStatsDailyByClient = `-- name: ListChannelStatsDailyByClient :many
 SELECT day,
        SUM(views)::bigint AS views,
@@ -1405,7 +1457,7 @@ func (q *Queries) ListClientChannelsToSync(ctx context.Context, clientID uuid.UU
 }
 
 const listClientsByWorkspace = `-- name: ListClientsByWorkspace :many
-SELECT id, workspace_id, name, contact_email, timezone, currency, created_at FROM clients WHERE workspace_id = $1 ORDER BY name
+SELECT id, workspace_id, name, contact_email, timezone, currency, archived_at, created_at FROM clients WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY name
 `
 
 func (q *Queries) ListClientsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]Client, error) {
@@ -1424,6 +1476,7 @@ func (q *Queries) ListClientsByWorkspace(ctx context.Context, workspaceID uuid.U
 			&i.ContactEmail,
 			&i.Timezone,
 			&i.Currency,
+			&i.ArchivedAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -1957,6 +2010,23 @@ UPDATE invitations SET accepted_at = now() WHERE id = $1 AND accepted_at IS NULL
 // Returns 0 rows affected if already accepted -> prevents double-accept races.
 func (q *Queries) MarkInvitationAccepted(ctx context.Context, id uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, markInvitationAccepted, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const restoreClient = `-- name: RestoreClient :execrows
+UPDATE clients SET archived_at = NULL WHERE id = $1 AND workspace_id = $2 AND archived_at IS NOT NULL
+`
+
+type RestoreClientParams struct {
+	ID          uuid.UUID `json:"id"`
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RestoreClient(ctx context.Context, arg RestoreClientParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreClient, arg.ID, arg.WorkspaceID)
 	if err != nil {
 		return 0, err
 	}

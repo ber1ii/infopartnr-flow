@@ -11,7 +11,13 @@ import (
 
 func (a *API) listClients(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	clients, err := a.Q.ListClientsByWorkspace(r.Context(), p.WorkspaceID)
+	var clients []db.Client
+	var err error
+	if r.URL.Query().Get("archived") == "true" {
+		clients, err = a.Q.ListArchivedClientsByWorkspace(r.Context(), p.WorkspaceID)
+	} else {
+		clients, err = a.Q.ListClientsByWorkspace(r.Context(), p.WorkspaceID)
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
@@ -20,6 +26,40 @@ func (a *API) listClients(w http.ResponseWriter, r *http.Request) {
 		clients = []db.Client{}
 	}
 	writeJSON(w, http.StatusOK, clients)
+}
+
+// archiveClient hides a client from the active list without deleting
+// anything. All of its data (links, conversions, integrations) is
+// untouched and the client's own dashboard pages stay reachable directly --
+// this only affects the list/switcher. Fully reversible via restoreClient.
+func (a *API) archiveClient(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	c := clientFrom(r.Context())
+	n, err := a.Q.ArchiveClient(r.Context(), db.ArchiveClientParams{ID: c.ID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if n == 0 {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) restoreClient(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	c := clientFrom(r.Context())
+	n, err := a.Q.RestoreClient(r.Context(), db.RestoreClientParams{ID: c.ID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if n == 0 {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) createClient(w http.ResponseWriter, r *http.Request) {

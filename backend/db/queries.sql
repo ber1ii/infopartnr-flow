@@ -88,7 +88,16 @@ RETURNING *;
 SELECT * FROM clients WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListClientsByWorkspace :many
-SELECT * FROM clients WHERE workspace_id = $1 ORDER BY name;
+SELECT * FROM clients WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY name;
+
+-- name: ListArchivedClientsByWorkspace :many
+SELECT * FROM clients WHERE workspace_id = $1 AND archived_at IS NOT NULL ORDER BY archived_at DESC;
+
+-- name: ArchiveClient :execrows
+UPDATE clients SET archived_at = now() WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL;
+
+-- name: RestoreClient :execrows
+UPDATE clients SET archived_at = NULL WHERE id = $1 AND workspace_id = $2 AND archived_at IS NOT NULL;
 
 -- name: ListChannelsByClient :many
 SELECT id, client_id, google_channel_id, title, thumbnail_url, status, connected_at, last_synced_at

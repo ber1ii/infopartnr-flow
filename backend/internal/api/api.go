@@ -68,6 +68,8 @@ func (a *API) Routes() http.Handler {
 			r.Route("/{clientID}", func(r chi.Router) {
 				r.Use(a.clientCtx) // tenant + role check for everything below
 				r.Get("/", a.getClient)
+				r.With(auth.RequireStaff).Delete("/", a.archiveClient)
+				r.With(auth.RequireStaff).Post("/restore", a.restoreClient)
 
 				r.Get("/conversions", a.listConversions)
 				r.Get("/stats/overview", a.statsOverview)
