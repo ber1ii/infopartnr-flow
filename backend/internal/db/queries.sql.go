@@ -618,8 +618,11 @@ FROM conversions cv
 WHERE cv.client_id = $1
   AND cv.source = 'stripe'
   AND cv.event_type <> 'refund'
-  AND (cv.raw->>'payment_intent' = $2::text
-       OR cv.raw->>'charge' = $3::text)
+  AND (
+    (cv.payment_intent <> '' AND cv.payment_intent = $2::text)
+    OR cv.raw->>'payment_intent' = $2::text
+    OR cv.raw->>'charge' = $3::text
+  )
 ORDER BY cv.occurred_at
 LIMIT 1
 `
@@ -641,6 +644,11 @@ type FindConversionByPaymentRow struct {
 }
 
 // Refunds inherit attribution from the original payment (matched via the stored Stripe object).
+// Prefers the dedicated payment_intent column (populated going forward for
+// one-time purchases). Falls back to the old raw-JSONB lookup for rows
+// inserted before this column existed. Subscription-sourced conversions
+// still won't match here -- see backlog note on refund attribution for
+// subscriptions, which needs a stored Stripe API key to resolve.
 func (q *Queries) FindConversionByPayment(ctx context.Context, arg FindConversionByPaymentParams) (FindConversionByPaymentRow, error) {
 	row := q.db.QueryRow(ctx, findConversionByPayment, arg.ClientID, arg.PaymentIntent, arg.Charge)
 	var i FindConversionByPaymentRow
@@ -1227,8 +1235,9 @@ const insertConversion = `-- name: InsertConversion :one
 
 INSERT INTO conversions (
     client_id, click_id, link_id, video_id, subscription_id, trakyo_id, source,
-    event_type, external_id, amount_cents, currency, email, attribution_method, raw, occurred_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    event_type, external_id, amount_cents, currency, email, attribution_method,
+    payment_intent, raw, occurred_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (client_id, source, external_id) DO NOTHING
 RETURNING id
 `
@@ -1247,6 +1256,7 @@ type InsertConversionParams struct {
 	Currency          string        `json:"currency"`
 	Email             string        `json:"email"`
 	AttributionMethod string        `json:"attribution_method"`
+	PaymentIntent     string        `json:"payment_intent"`
 	Raw               []byte        `json:"raw"`
 	OccurredAt        time.Time     `json:"occurred_at"`
 }
@@ -1268,6 +1278,7 @@ func (q *Queries) InsertConversion(ctx context.Context, arg InsertConversionPara
 		arg.Currency,
 		arg.Email,
 		arg.AttributionMethod,
+		arg.PaymentIntent,
 		arg.Raw,
 		arg.OccurredAt,
 	)

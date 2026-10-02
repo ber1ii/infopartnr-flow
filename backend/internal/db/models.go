@@ -60,6 +60,7 @@ type Conversion struct {
 	VideoID           uuid.NullUUID `json:"video_id"`
 	SubscriptionID    uuid.NullUUID `json:"subscription_id"`
 	TrakyoID          string        `json:"trakyo_id"`
+	PaymentIntent     string        `json:"payment_intent"`
 	Source            string        `json:"source"`
 	EventType         string        `json:"event_type"`
 	ExternalID        string        `json:"external_id"`

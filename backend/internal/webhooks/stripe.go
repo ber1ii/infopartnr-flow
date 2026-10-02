@@ -161,17 +161,22 @@ func (h *Stripe) handle(ctx context.Context, clientID uuid.UUID, ev event) error
 // ---- checkout.session.completed ----
 
 type checkoutSession struct {
-	ID                string            `json:"id"`
-	Mode              string            `json:"mode"`
-	PaymentStatus     string            `json:"payment_status"`
-	ClientReferenceID string            `json:"client_reference_id"`
-	AmountTotal       int64             `json:"amount_total"`
-	Currency          string            `json:"currency"`
-	Created           int64             `json:"created"`
-	CustomerEmail     string            `json:"customer_email"`
-	Subscription      string            `json:"subscription"`
-	Metadata          map[string]string `json:"metadata"`
-	CustomerDetails   struct {
+	ID                string `json:"id"`
+	Mode              string `json:"mode"`
+	PaymentStatus     string `json:"payment_status"`
+	ClientReferenceID string `json:"client_reference_id"`
+	AmountTotal       int64  `json:"amount_total"`
+	Currency          string `json:"currency"`
+	Created           int64  `json:"created"`
+	CustomerEmail     string `json:"customer_email"`
+	Subscription      string `json:"subscription"`
+	// Populated by Stripe for mode=payment sessions; empty for
+	// mode=subscription, which never surfaces a payment_intent on the
+	// session itself. Used to make refund.created matching exact instead of
+	// digging through raw JSON -- see FindConversionByPayment.
+	PaymentIntent   string            `json:"payment_intent"`
+	Metadata        map[string]string `json:"metadata"`
+	CustomerDetails struct {
 		Email string `json:"email"`
 	} `json:"customer_details"`
 }
@@ -232,6 +237,7 @@ func (h *Stripe) checkout(ctx context.Context, clientID uuid.UUID, obj json.RawM
 		Currency:          strings.ToUpper(s.Currency),
 		Email:             strings.ToLower(email),
 		AttributionMethod: att.Method,
+		PaymentIntent:     s.PaymentIntent,
 		Raw:               []byte(obj),
 		OccurredAt:        occurred,
 	})

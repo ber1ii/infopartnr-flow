@@ -198,8 +198,9 @@ DELETE FROM link_variants WHERE id = $1 AND link_id = $2;
 -- name: InsertConversion :one
 INSERT INTO conversions (
     client_id, click_id, link_id, video_id, subscription_id, trakyo_id, source,
-    event_type, external_id, amount_cents, currency, email, attribution_method, raw, occurred_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    event_type, external_id, amount_cents, currency, email, attribution_method,
+    payment_intent, raw, occurred_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (client_id, source, external_id) DO NOTHING
 RETURNING id;
 
@@ -359,13 +360,21 @@ WHERE client_id = $1 AND external_id = $2;
 
 -- Refunds inherit attribution from the original payment (matched via the stored Stripe object).
 -- name: FindConversionByPayment :one
+-- Prefers the dedicated payment_intent column (populated going forward for
+-- one-time purchases). Falls back to the old raw-JSONB lookup for rows
+-- inserted before this column existed. Subscription-sourced conversions
+-- still won't match here -- see backlog note on refund attribution for
+-- subscriptions, which needs a stored Stripe API key to resolve.
 SELECT cv.click_id, cv.link_id, cv.video_id, cv.subscription_id, cv.trakyo_id, cv.email, cv.attribution_method
 FROM conversions cv
 WHERE cv.client_id = sqlc.arg(client_id)
   AND cv.source = 'stripe'
   AND cv.event_type <> 'refund'
-  AND (cv.raw->>'payment_intent' = sqlc.arg(payment_intent)::text
-       OR cv.raw->>'charge' = sqlc.arg(charge)::text)
+  AND (
+    (cv.payment_intent <> '' AND cv.payment_intent = sqlc.arg(payment_intent)::text)
+    OR cv.raw->>'payment_intent' = sqlc.arg(payment_intent)::text
+    OR cv.raw->>'charge' = sqlc.arg(charge)::text
+  )
 ORDER BY cv.occurred_at
 LIMIT 1;
 
