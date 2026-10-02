@@ -200,6 +200,7 @@ CREATE TABLE conversions (
     video_id UUID REFERENCES videos(id) ON DELETE SET NULL,
     subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
     trakyo_id TEXT NOT NULL DEFAULT '',
+    payment_intent TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL CHECK (source IN ('stripe', 'calendly', 'typeform', 'manual')),
     event_type TEXT NOT NULL CHECK (event_type IN
         ('purchase', 'subscription_start', 'subscription_renewal', 'booked_call', 'lead', 'refund')),
@@ -216,6 +217,7 @@ CREATE TABLE conversions (
 CREATE INDEX conversions_client_time_idx ON conversions (client_id, occurred_at);
 CREATE INDEX conversions_video_time_idx ON conversions (video_id, occurred_at);
 CREATE INDEX conversions_email_idx ON conversions (client_id, email);
+CREATE INDEX conversions_payment_intent_idx ON conversions (client_id, payment_intent) WHERE payment_intent <> '';
 
 -- ===== Integrations, alerts, sharing =====
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"infopartnr-flow/backend/internal/db"
@@ -216,6 +217,40 @@ func (a *API) setIntegrationSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// revealIntegrationSecret decrypts and returns a previously-saved secret.
+// Secrets used to be write-only (shown once at creation, never again) --
+// this exists because Typeform's webhook secret in particular is reused
+// across multiple forms, so a client reconnecting a second or third form
+// needs it again, and re-digging through Typeform's own UI for something
+// *we* generated is a worse experience than just showing it back to them.
+func (a *API) revealIntegrationSecret(w http.ResponseWriter, r *http.Request) {
+	c := clientFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "integrationID"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	row, err := a.Q.GetIntegrationSecret(r.Context(), db.GetIntegrationSecretParams{ID: id, ClientID: c.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if len(row.WebhookSecretEnc) == 0 {
+		writeErr(w, http.StatusNotFound, "no secret configured")
+		return
+	}
+	secret, err := a.Box.Decrypt(row.WebhookSecretEnc)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"signing_secret": string(secret)})
 }
 
 func (a *API) deleteIntegration(w http.ResponseWriter, r *http.Request) {

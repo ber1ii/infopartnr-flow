@@ -360,6 +360,15 @@ function TypeformCard({
     connect.mutate(secret)
   }
 
+  // Typeform's webhook secret is reused across multiple forms, so a client
+  // reconnecting a second or third form may need it again. Not fetched
+  // until "Reveal" is clicked.
+  const revealed = useQuery({
+    queryKey: ["integration-secret", typeform?.id],
+    queryFn: () => api<{ signing_secret: string }>(`${base}/${typeform!.id}/secret`),
+    enabled: false,
+  })
+
   return (
     <Card className="space-y-5 p-6">
       <div className="flex items-center justify-between gap-4">
@@ -392,8 +401,32 @@ function TypeformCard({
             <div className="text-sm font-medium">Set up the webhook in Typeform</div>
             <p className="text-sm text-muted-foreground">
               In your form's Connect panel, add a Webhook pointing at this URL{generated ? ", using the secret above as the webhook secret" : ""}.
+              Connecting another form? Use the same secret again — click Reveal below.
             </p>
             <CopyRow label="Webhook URL" value={typeform.webhook_url} />
+            {!generated && (
+              <div className="space-y-1.5">
+                {revealed.data ? (
+                  <CopyRow label="Webhook secret" value={revealed.data.signing_secret} />
+                ) : (
+                  <>
+                    <Label>Webhook secret</Label>
+                    <div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => revealed.refetch()}
+                        disabled={revealed.isFetching}
+                      >
+                        {revealed.isFetching ? "Revealing…" : "Reveal"}
+                      </Button>
+                    </div>
+                  </>
+                )}
+                {revealed.isError && <p className="text-sm text-destructive">{errMsg(revealed.error)}</p>}
+              </div>
+            )}
           </div>
 
           <div className="space-y-1 text-sm text-muted-foreground">

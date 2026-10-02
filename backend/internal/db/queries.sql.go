@@ -570,6 +570,48 @@ func (q *Queries) FindClickIDByEmail(ctx context.Context, arg FindClickIDByEmail
 	return i, err
 }
 
+const findClickIDByEmailNormalized = `-- name: FindClickIDByEmailNormalized :one
+SELECT c.id, c.link_id, c.video_id, c.trakyo_id
+FROM identities i
+JOIN clicks c ON c.trakyo_id = i.trakyo_id
+WHERE i.client_id = $1
+  AND split_part(i.email, '@', 2) IN ('gmail.com', 'googlemail.com')
+  AND split_part($2::text, '@', 2) IN ('gmail.com', 'googlemail.com')
+  AND regexp_replace(regexp_replace(split_part(i.email, '@', 1), '\+.*', ''), '\.', '', 'g')
+    = regexp_replace(regexp_replace(split_part($2::text, '@', 1), '\+.*', ''), '\.', '', 'g')
+ORDER BY c.created_at DESC
+LIMIT 1
+`
+
+type FindClickIDByEmailNormalizedParams struct {
+	ClientID uuid.UUID `json:"client_id"`
+	Email    string    `json:"email"`
+}
+
+type FindClickIDByEmailNormalizedRow struct {
+	ID       int64         `json:"id"`
+	LinkID   uuid.UUID     `json:"link_id"`
+	VideoID  uuid.NullUUID `json:"video_id"`
+	TrakyoID string        `json:"trakyo_id"`
+}
+
+// Fallback only, tried after an exact match misses. Gmail/Google Workspace
+// ignore dots and anything after '+' in the local part of an address, so
+// the same visitor can show up under superficially different addresses.
+// Both sides restricted to gmail.com/googlemail.com so two unrelated
+// people on other providers can never false-match.
+func (q *Queries) FindClickIDByEmailNormalized(ctx context.Context, arg FindClickIDByEmailNormalizedParams) (FindClickIDByEmailNormalizedRow, error) {
+	row := q.db.QueryRow(ctx, findClickIDByEmailNormalized, arg.ClientID, arg.Email)
+	var i FindClickIDByEmailNormalizedRow
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.VideoID,
+		&i.TrakyoID,
+	)
+	return i, err
+}
+
 const findConversionByPayment = `-- name: FindConversionByPayment :one
 SELECT cv.click_id, cv.link_id, cv.video_id, cv.subscription_id, cv.trakyo_id, cv.email, cv.attribution_method
 FROM conversions cv
@@ -896,6 +938,27 @@ func (q *Queries) GetIntegrationForWebhook(ctx context.Context, id uuid.UUID) (G
 		&i.WebhookSecretEnc,
 		&i.IsActive,
 	)
+	return i, err
+}
+
+const getIntegrationSecret = `-- name: GetIntegrationSecret :one
+SELECT id, webhook_secret_enc FROM integrations WHERE id = $1 AND client_id = $2
+`
+
+type GetIntegrationSecretParams struct {
+	ID       uuid.UUID `json:"id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+type GetIntegrationSecretRow struct {
+	ID               uuid.UUID `json:"id"`
+	WebhookSecretEnc []byte    `json:"webhook_secret_enc"`
+}
+
+func (q *Queries) GetIntegrationSecret(ctx context.Context, arg GetIntegrationSecretParams) (GetIntegrationSecretRow, error) {
+	row := q.db.QueryRow(ctx, getIntegrationSecret, arg.ID, arg.ClientID)
+	var i GetIntegrationSecretRow
+	err := row.Scan(&i.ID, &i.WebhookSecretEnc)
 	return i, err
 }
 

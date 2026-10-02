@@ -62,6 +62,26 @@ func Resolve(ctx context.Context, q *db.Queries, clientID uuid.UUID, trakyoID, e
 		case !errors.Is(err, pgx.ErrNoRows):
 			return res, err
 		}
+
+		// Gmail/Google Workspace alias fallback -- see common.go's
+		// resolveAttribution for the full rationale. Same restriction here:
+		// only applied when both sides are gmail.com/googlemail.com.
+		// Distinct variable: FindClickIDByEmailNormalized returns a
+		// differently-named sqlc row type, even though structurally
+		// identical, so it can't be assigned onto c above with =.
+		cn, err := q.FindClickIDByEmailNormalized(ctx, db.FindClickIDByEmailNormalizedParams{ClientID: clientID, Email: email})
+		switch {
+		case err == nil:
+			return Result{
+				ClickID:  pgtype.Int8{Int64: cn.ID, Valid: true},
+				LinkID:   uuid.NullUUID{UUID: cn.LinkID, Valid: true},
+				VideoID:  cn.VideoID,
+				TrakyoID: cn.TrakyoID,
+				Method:   "email",
+			}, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return res, err
+		}
 	}
 	return res, nil
 }

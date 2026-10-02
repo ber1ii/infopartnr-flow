@@ -90,6 +90,7 @@ func (a *API) Routes() http.Handler {
 					r.Get("/", a.listIntegrations)
 					r.Post("/", a.createIntegration)
 					r.Put("/{integrationID}/secret", a.setIntegrationSecret)
+					r.Get("/{integrationID}/secret", a.revealIntegrationSecret)
 					r.Delete("/{integrationID}", a.deleteIntegration)
 				})
 

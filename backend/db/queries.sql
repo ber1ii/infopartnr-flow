@@ -212,6 +212,23 @@ WHERE i.client_id = $1 AND i.email = $2
 ORDER BY c.created_at DESC
 LIMIT 1;
 
+-- name: FindClickIDByEmailNormalized :one
+-- Fallback only, tried after an exact match misses. Gmail/Google Workspace
+-- ignore dots and anything after '+' in the local part of an address, so
+-- the same visitor can show up under superficially different addresses.
+-- Both sides restricted to gmail.com/googlemail.com so two unrelated
+-- people on other providers can never false-match.
+SELECT c.id, c.link_id, c.video_id, c.trakyo_id
+FROM identities i
+JOIN clicks c ON c.trakyo_id = i.trakyo_id
+WHERE i.client_id = $1
+  AND split_part(i.email, '@', 2) IN ('gmail.com', 'googlemail.com')
+  AND split_part(sqlc.arg(email)::text, '@', 2) IN ('gmail.com', 'googlemail.com')
+  AND regexp_replace(regexp_replace(split_part(i.email, '@', 1), '\+.*', ''), '\.', '', 'g')
+    = regexp_replace(regexp_replace(split_part(sqlc.arg(email)::text, '@', 1), '\+.*', ''), '\.', '', 'g')
+ORDER BY c.created_at DESC
+LIMIT 1;
+
 -- ===== Analytics =====
 -- Columns are table-qualified everywhere: sqlc reports "ambiguous" otherwise.
 
@@ -301,6 +318,9 @@ DELETE FROM integrations WHERE id = $1 AND client_id = $2;
 SELECT id, client_id, provider, webhook_secret_enc, is_active
 FROM integrations
 WHERE id = $1;
+
+-- name: GetIntegrationSecret :one
+SELECT id, webhook_secret_enc FROM integrations WHERE id = $1 AND client_id = $2;
 
 -- ===== Attribution =====
 

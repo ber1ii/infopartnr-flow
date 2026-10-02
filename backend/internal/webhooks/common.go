@@ -103,6 +103,17 @@ func resolveAttribution(ctx context.Context, q *db.Queries, clientID uuid.UUID, 
 			id, link := c.ID, c.LinkID
 			return &id, &link, nullUUIDPtr(c.VideoID), "email"
 		}
+		// Gmail/Google Workspace alias fallback: dots and +tags in the local
+		// part are ignored by Gmail, so the same visitor can submit under
+		// superficially different addresses across steps of the funnel
+		// (e.g. "d.vujkovic@gmail.com" on Typeform, "dvujkovic+stripe@gmail.com"
+		// on Stripe). Tried only after an exact match misses, and the SQL
+		// restricts both sides to gmail.com/googlemail.com so two unrelated
+		// people on other providers can never false-match.
+		if c, err := q.FindClickIDByEmailNormalized(ctx, db.FindClickIDByEmailNormalizedParams{ClientID: clientID, Email: email}); err == nil {
+			id, link := c.ID, c.LinkID
+			return &id, &link, nullUUIDPtr(c.VideoID), "email"
+		}
 	}
 	return nil, nil, nil, "none"
 }
